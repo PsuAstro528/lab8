@@ -14,11 +14,11 @@ data
 # Export Pluto notebook outputs
 pluto_state_cache
 index.html
+*backup*.jl
 # ex*.html
 
 # Jupyter files
 .ipynb_checkpoints
-*backkup*.jl
 core*
 
 # File to track whether project has been instantiated
