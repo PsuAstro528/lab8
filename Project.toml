@@ -23,19 +23,22 @@ Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 Weave = "44d3d7a6-8a23-5bf8-98c5-b353f8df5ec9"
 
 [compat]
-CUDA = "5.8.2"
-CUDA_Driver_jll = "<13"
-CUDA_Runtime_jll = "<13"
 Pkg = "1.11.0"
 Pluto = "0.20.17"
 julia = "1.11"
+CUDA = "5.8.2"
+CUDA_Driver_jll = "<13"
+CUDA_Runtime_jll = "<13"
+
 
 [extras]
 CUDA_Runtime_jll = "76a88914-d11a-5bdc-97e0-2f5a05c973a2"
 Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
 Pluto = "c3e4b0f8-55cb-11ea-2926-15256bba5781"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-build = ["Pkg", "Pluto"]
-test = ["Pkg", "Pluto", "Test"]
+build = ["Pkg","Pluto"]
+test = ["Pluto", "Pkg", "Random", "Test"]
+
