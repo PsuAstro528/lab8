@@ -27,13 +27,12 @@ md"""
 
 # ╔═╡ 47d2db32-cfd7-46cc-81de-09f366b61dc9
 md"""
-In this lab exercise, we'll verify that we have access to a GPU, learn a little about its properties and benchmark some simple operations on a GPU to see how performance compares.  While most modern laptops have a GPU, not all are designed to support general purpose programming, and most laptop GPUs will be so low power that the benchmarking results won't be very informative.  Therefore, students are advised to run the exercises in this lab on the Roar, rather than their own system (unless they're sure that they have setup their own system for GPU computing properly).  
-All students registered for Astro 528 should have access to 
-a GPU as part of the class allocation.  However, there may be times when all the GPUs reserved for the class are in use (e.g., during class, near deadlines).  
+In this lab exercise, we'll verify that we have access to a GPU, learn a little about its properties and benchmark some simple operations on a GPU to see how performance compares.  While most modern laptops have a GPU, not all are designed to support general purpose programming, and most laptop GPUs will be so low power that the benchmarking results won't be very informative.  Therefore, students are advised to run the exercises in this lab on the Lynx cluster, rather than their own system (unless they're sure that they have setup their own system for GPU computing properly).  
+All students registered for Astro 528 should have access to a GPU as part of the class allocation.  However, there may be times when all the GPUs reserved for the class are in use (e.g., during class, near deadlines).  
 
-While the ICDS-ACI portal allows users to request a JupyterLab session that includes access to a GPU, if everyone tries to do this at once, then some people will likely be blocked out.  We can prevent this during class if students either:
+While the ICDS Lynx portal allows users to request a JupyterLab session that includes access to a GPU, if everyone tries to do this at once, then some people will likely be blocked out.  We can prevent this during class if students either:
 - team up with a partner and share one JupyterLab session, or
-- view the html version of [this notebook](https://psuastro528.github.io/lab8-start/ex1.html) online rather than running it via the JupyterLab server.  
+- view the html version of [this notebook](https://psuastro528.github.io/lab8/ex1.html) online rather than running it via the JupyterLab server.  
 
 In either case, you'll modify the ex1.pbs script as necessary and use `qsub` to submit it as a batch job that will run this script and save the resulting figures to disk.  
 If you access a GPU via JupyterLab session at another time, then please be curtious and close GPU sessions promptly after you're done, so that others can access the GPUs.
