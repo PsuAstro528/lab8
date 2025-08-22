@@ -3,7 +3,7 @@
 
 ## Exercise 1:  GPU Computing I: Getting Started with GPU Computing & Linear Algebra
 ### Goals:  
-- Run GPU code on Roar
+- Run GPU code
 - Accelerate linear algebra computations with GPU 
 - Recognize what problem sizes and likely to result in acceleration with a GPU for linear algebra
 
