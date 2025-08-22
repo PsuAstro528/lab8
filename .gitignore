@@ -1,5 +1,6 @@
 # Julia environment
 deps/deps.jl
+deps/build.log
 Manifest.toml
 
 # Julia profiling
@@ -19,6 +20,7 @@ index.html
 
 # Jupyter files
 .ipynb_checkpoints
+src/.ipynb_checkpoints
 core*
 
 # File to track whether project has been instantiated
