@@ -1,9 +1,7 @@
 #!/bin/bash 
 ## Submit job to our class's allocation
-##SBATCH --partition=sla-prio
-#SBATCH --partition=burst
-#SBATCH --qos=burst4x 
-#SBATCH --account=ebf11-fa23_p_gpu
+#SBATCH --partition=standard
+#SBATCH --account=hpc4astro_crch_fall2025
 
 ## Time requested: 0 hours, 15 minutes, 0 seconds
 #SBATCH --time=0:15:00 
@@ -12,7 +10,7 @@
 #SBATCH --nodes=1 
 #SBATCH --ntasks-per-node=1
 #SBATCH --ntasks=1 
-#SBATCH --gpus=1
+#SBATCH --gres=gpu:1
 
 ## Promise that each processor will use no more than 1GB of RAM
 #SBATCH --mem-per-cpu=8GB
@@ -37,8 +35,8 @@ date
 echo "This job was assigned the following nodes"
 echo $SLURM_NODELIST
 
-echo "Activing environment with that provides Julia 1.9.2"
-source /storage/group/RISE/classroom/astro_528/scripts/env_setup
+echo "Activing environment with that provides Julia 1.11.2"
+source /storage/ehome/ebf11/hpc4astro/astro_528/scripts/env_setup
 
 echo "About to change into $SLURM_SUBMIT_DIR"
 cd $SLURM_SUBMIT_DIR            # Change into directory where job was submitted from
@@ -52,6 +50,7 @@ else
     echo "# $FILE does not exist. Will install relevant packages."
     julia --project -e 'import Pkg; Pkg.instantiate() '
     julia --project -e 'import Pluto, Pkg; Pluto.activate_notebook_environment("ex1.jl"); Pkg.instantiate() '
+    julia --project -e 'import Pkg; Pkg.build() '
     touch $FILE
 fi
 
