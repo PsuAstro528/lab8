@@ -9,6 +9,7 @@ begin
         import Pkg
         Pkg.offline()
         using CUDA
+		#CUDA.set_runtime_version!(v"12.6.2"; local_toolkit=true)
 end
 
 # ╔═╡ 3e61f670-5113-40f8-b8f4-4982c663eb19
@@ -102,8 +103,8 @@ md"Now, let's create some matrices and arrays on the CPU that we'll use for test
 
 # ╔═╡ c739f53b-c7c8-4b49-9ae4-cf8edc246c25
 begin
-	N = 4*1024
-	M = 4*1024
+	N = 2*1024
+	M = 2*1024
 end;
 
 # ╔═╡ 0afda366-146c-408b-9d14-0ce510e2db2c
@@ -111,7 +112,7 @@ begin
 	A_h = randn(N,M)
 	x_h = randn(M);
 
-	b_h = A_h*x_h;
+	b_h = A_h.*x_h;
 end;
 
 # ╔═╡ 11c4ecad-8fa7-428d-aa73-64c1238c7947
@@ -125,8 +126,13 @@ We can create a 'CuArray' from an existing Array simply with the `cu(.)` functio
 begin
 	A_d = cu(A_h)
 	x_d = cu(x_h)
-	b_d = A_d*x_d
 end;
+
+# ╔═╡ 1b87e08c-c26d-4ab3-a5a8-4c56935240a9
+b_d = A_d.*x_d
+
+# ╔═╡ e0ecfa6c-4942-473f-bd15-a51381580fda
+A_d*x_d
 
 # ╔═╡ 81056fe9-34e4-4f1f-850a-2b10df79cd4a
 md"First, let's check the type of each variable."
@@ -148,10 +154,12 @@ By using two CuArray's as input, the result of the calculation is also stored as
 with_terminal() do 
 	@time CUDA.@allowscalar b_d[1]
 	@time CUDA.@allowscalar b_d[1]
+	@time CUDA.@allowscalar b_d[1]
 end
 
 # ╔═╡ b40e67e0-0b14-45b1-87c1-1a94a536b84d
 with_terminal() do
+	@time b_comp_h = collect(b_d)
 	@time b_comp_h = collect(b_d)
 	@time b_comp_h = collect(b_d)
 end
@@ -186,8 +194,13 @@ One thing to keep in mind is that most "consumer grade" GPUs are designed to onl
 begin
 	A_d64 = CuArray{Float64}(A_h)
 	x_d64 = CuArray{Float64}(x_h)
-	b_d64 = A_d64*x_d64
+	b_d64 = A_d64.*x_d64
 	maximum(abs.(collect(b_d64) .- b_h))
+end
+
+# ╔═╡ e495b424-8583-4857-bfb9-c1db9832ed3d
+begin
+		A_d64*x_d64
 end
 
 # ╔═╡ da6782ac-daf0-425f-bf1f-96d4e99caade
@@ -210,7 +223,10 @@ Note that we'll be able to use the exact same macros to benchmark code running o
 @benchmark b_h_comp = $A_h*$x_h seconds=1
 
 # ╔═╡ 9cf8fdc6-16ba-405c-a9ce-2f22162fa8b8
-@benchmark b_d = $A_d*$x_d seconds=1
+@benchmark b_d = $A_d.*$x_d seconds=1
+
+# ╔═╡ 5c6dda9b-97cf-49f7-96f0-bdbc398b146e
+
 
 # ╔═╡ 4a9161e9-57f8-43b4-84bc-3b7d8807cbb5
 md"""
@@ -220,6 +236,12 @@ If we want to benchmark how long is required to the calculation to complete, we 
 
 # ╔═╡ e3b5fd7c-7e5c-4e68-84f4-db5a66b72db1
 @benchmark CUDA.@sync( b_d = $A_d*$x_d) seconds=1
+
+# ╔═╡ 5501587f-89f7-4a01-8e7d-8794a208c223
+tmp_d = similar(x_d)
+
+# ╔═╡ 881a6291-c95b-4c33-ad4e-13d84fb5964c
+mul!(tmp_d, A_d, x_d)
 
 # ╔═╡ 203ba323-9b71-49dd-956b-de677cc8a033
 md"1d. Looking at the three above histograms, how long does it take to launch the GPU kernel and return flow control to the CPU, without waiting for the GPU tasks to complete?  "
@@ -685,6 +707,9 @@ Plots = "~1.40.19"
 PlutoTeachingTools = "~0.4.5"
 PlutoTest = "~0.2.2"
 PlutoUI = "~0.7.71"
+
+[extras]
+CUDA_Runtime_jll = "76a88914-d11a-5bdc-97e0-2f5a05c973a2"
 """
 
 # ╔═╡ 00000000-0000-0000-0000-000000000002
@@ -2195,7 +2220,7 @@ version = "1.9.2+0"
 # ╟─552232bf-f995-429a-a58b-add54ea77b91
 # ╠═7260f7cb-37be-468a-a48a-2762049acb64
 # ╟─bb9ba9b8-cec6-40c6-850f-8c380b2bb8b9
-# ╠═89428d6e-fe54-454c-a8cd-34c149575e58
+# ╟─89428d6e-fe54-454c-a8cd-34c149575e58
 # ╟─2ef25884-dc3c-4c18-b5f0-daeaf68260b1
 # ╟─f682634c-1161-49b3-ac90-edb8804de13d
 # ╟─fb1642c0-ecf7-45e0-86e7-e0190853e2bf
@@ -2208,6 +2233,9 @@ version = "1.9.2+0"
 # ╠═0afda366-146c-408b-9d14-0ce510e2db2c
 # ╟─11c4ecad-8fa7-428d-aa73-64c1238c7947
 # ╠═378488d1-c86c-4db0-9416-739896ac6632
+# ╠═1b87e08c-c26d-4ab3-a5a8-4c56935240a9
+# ╠═e495b424-8583-4857-bfb9-c1db9832ed3d
+# ╠═e0ecfa6c-4942-473f-bd15-a51381580fda
 # ╟─81056fe9-34e4-4f1f-850a-2b10df79cd4a
 # ╠═f82bbb2d-71d3-43af-a949-3fb9b38ee0cd
 # ╟─10925beb-c6b1-47e1-9003-279fadc465a0
@@ -2226,8 +2254,11 @@ version = "1.9.2+0"
 # ╟─aaa959b6-3eec-47f2-8f67-3308c6279edd
 # ╠═f7f24f2f-a085-49a4-a264-2a55159bf00c
 # ╠═9cf8fdc6-16ba-405c-a9ce-2f22162fa8b8
+# ╠═5c6dda9b-97cf-49f7-96f0-bdbc398b146e
 # ╟─4a9161e9-57f8-43b4-84bc-3b7d8807cbb5
 # ╠═e3b5fd7c-7e5c-4e68-84f4-db5a66b72db1
+# ╠═5501587f-89f7-4a01-8e7d-8794a208c223
+# ╠═881a6291-c95b-4c33-ad4e-13d84fb5964c
 # ╟─203ba323-9b71-49dd-956b-de677cc8a033
 # ╠═2af9ae78-b042-490e-ad79-e0c87dcb2eb3
 # ╟─32604896-2034-42f7-bc49-6117fe13f6d2
