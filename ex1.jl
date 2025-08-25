@@ -707,6 +707,7 @@ Plots = "~1.40.19"
 PlutoTeachingTools = "~0.4.5"
 PlutoTest = "~0.2.2"
 PlutoUI = "~0.7.71"
+julia = "1.11"
 
 [extras]
 CUDA_Runtime_jll = "76a88914-d11a-5bdc-97e0-2f5a05c973a2"
@@ -718,7 +719,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.11.2"
 manifest_format = "2.0"
-project_hash = "8e4faa40ac636d95ae30ae74855b33582d8ced32"
+project_hash = "ed2840fae01e2eda0b0e0cf348a182e23724e387"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
