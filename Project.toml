@@ -1,6 +1,7 @@
 [deps]
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+CUDA_Driver_jll = "4ee394cb-3365-5eb0-8335-949819d2adfc"
 CUDA_Runtime_jll = "76a88914-d11a-5bdc-97e0-2f5a05c973a2"
 FLoops = "cc61a311-1640-44b5-9fba-1b764f453329"
 GPUCompiler = "61eb1bfa-7361-4325-ad38-22787b887f55"
