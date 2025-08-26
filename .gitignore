@@ -1,0 +1,29 @@
+# Julia environment
+deps/deps.jl
+deps/build.log
+Manifest.toml
+
+# Julia profiling
+*.jl.cov 
+*.jl.*.cov
+*.jl.mem
+
+# Outputs, intentional, but big
+data
+*.png
+
+# Export Pluto notebook outputs
+pluto_state_cache
+index.html
+*backup*.jl
+# ex*.html
+
+# Jupyter files
+.ipynb_checkpoints
+src/.ipynb_checkpoints
+core*
+
+# File to track whether project has been instantiated
+Project_has_been_instantiated
+
+pluto_state_cache
