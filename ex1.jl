@@ -10,6 +10,7 @@ begin
         Pkg.offline()
         using CUDA
 		#CUDA.set_runtime_version!(v"12.6.2"; local_toolkit=true)
+		CUDA.allowscalar(false)
 end
 
 # ╔═╡ 3e61f670-5113-40f8-b8f4-4982c663eb19
@@ -112,8 +113,11 @@ begin
 	A_h = randn(N,M)
 	x_h = randn(M);
 
-	b_h = A_h.*x_h;
+	b_h = A_h*x_h;
 end;
+
+# ╔═╡ 4f191c76-1a4b-4323-a5d8-b0fd97199956
+LinearAlgebra.BLAS.get_num_threads()
 
 # ╔═╡ 11c4ecad-8fa7-428d-aa73-64c1238c7947
 md"""
@@ -124,15 +128,16 @@ We can create a 'CuArray' from an existing Array simply with the `cu(.)` functio
 
 # ╔═╡ 378488d1-c86c-4db0-9416-739896ac6632
 begin
-	A_d = cu(A_h)
-	x_d = cu(x_h)
+	A_d = cu(A_h; unified=false)
+	x_d = cu(x_h; unified=false)
+	b_d = cu(b_h; unified=false)
 end;
 
 # ╔═╡ 1b87e08c-c26d-4ab3-a5a8-4c56935240a9
-b_d = A_d.*x_d
+A_d.*x_d;
 
 # ╔═╡ e0ecfa6c-4942-473f-bd15-a51381580fda
-A_d*x_d
+mul!(b_d,A_d,x_d)
 
 # ╔═╡ 81056fe9-34e4-4f1f-850a-2b10df79cd4a
 md"First, let's check the type of each variable."
@@ -332,6 +337,12 @@ Instead of doing linear algebra on one big matrix to get a speedup, you could us
 # ╔═╡ bf17466e-b5a3-4180-acfb-362c5da55d70
 num_systems = 100
 
+# ╔═╡ fe609884-c598-4391-ab06-4ba7166b65ff
+let # Test CUBLAS reports that all solves suceeded
+	CUDA.@sync output_flag_d
+	@test all(collect(output_flag_d).==0)
+end
+
 # ╔═╡ 80a04a89-b23e-4d2f-9a4d-ce887ba0cf61
 md"""
 To find other batched functions or to make sense of the outputs, you'll want to look at the documentation for [CUBLAS](https://docs.nvidia.com/cuda/cublas/index.html), the library of CUDA functions that provide these operations.  For some problem sizes, the CUBLAS functions are very efficient.  For other problem sizes, you can work more efficiently using multiple asyncrhonous kernel calls or just using multi-threading on the CPU. 
@@ -344,6 +355,20 @@ Now we'll plot benchmarks as a function of the number of systems to solve for a 
 
 # ╔═╡ 185cdee9-84e7-443f-a6a3-7ae6369e956e
 n_batched_matrices = 128
+
+# ╔═╡ 1a5e09f6-0b83-4e13-af89-4364e219ff16
+begin
+	A, x, b = make_inputs_batched_Ax_eq_b(n_batched_matrices,num_systems)
+	d_A = copy_array_of_arrays_to_gpu(A)
+	d_b = copy_array_of_arrays_to_gpu(b)
+	output_qr_d, output_x_d, output_flag_d = CUBLAS.gels_batched('N', d_A, d_b) 
+end
+
+# ╔═╡ f1233e72-adc0-43dc-8796-055cf9baf4e7
+let # Check absolute value of worst element of all solutions
+	CUDA.@sync output_x_d
+	maximum(map(i->maximum(abs.(x[i].-collect(output_x_d[i]))), 1:num_systems))
+end
 
 # ╔═╡ 15265935-4b90-4d6d-9540-c13c2e4bd6cb
 md"""
@@ -426,26 +451,6 @@ function copy_array_of_arrays_to_gpu(A::TArrayOuter; force_sync::Bool = false) w
 		CUDA.@sync d_A
 	end
 	return d_A
-end
-
-# ╔═╡ 1a5e09f6-0b83-4e13-af89-4364e219ff16
-begin
-	A, x, b = make_inputs_batched_Ax_eq_b(n_batched_matrices,num_systems)
-	d_A = copy_array_of_arrays_to_gpu(A)
-	d_b = copy_array_of_arrays_to_gpu(b)
-	output_qr_d, output_x_d, output_flag_d = CUBLAS.gels_batched('N', d_A, d_b) 
-end
-
-# ╔═╡ fe609884-c598-4391-ab06-4ba7166b65ff
-let # Test CUBLAS reports that all solves suceeded
-	CUDA.@sync output_flag_d
-	@test all(collect(output_flag_d).==0)
-end
-
-# ╔═╡ f1233e72-adc0-43dc-8796-055cf9baf4e7
-let # Check absolute value of worst element of all solutions
-	CUDA.@sync output_x_d
-	maximum(map(i->maximum(abs.(x[i].-collect(output_x_d[i]))), 1:num_systems))
 end
 
 # ╔═╡ c1d3f9f3-269f-43b4-9336-b376b7e98361
@@ -2232,6 +2237,7 @@ version = "1.9.2+0"
 # ╟─6cb46d4d-6e3b-4bb7-b1b5-e82e7294427f
 # ╠═c739f53b-c7c8-4b49-9ae4-cf8edc246c25
 # ╠═0afda366-146c-408b-9d14-0ce510e2db2c
+# ╠═4f191c76-1a4b-4323-a5d8-b0fd97199956
 # ╟─11c4ecad-8fa7-428d-aa73-64c1238c7947
 # ╠═378488d1-c86c-4db0-9416-739896ac6632
 # ╠═1b87e08c-c26d-4ab3-a5a8-4c56935240a9
