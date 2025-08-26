@@ -13,7 +13,7 @@
 #SBATCH --gres=gpu:1
 
 ## Promise that each processor will use no more than 1GB of RAM
-#SBATCH --mem-per-cpu=8GB
+#SBATCH --mem=16GB
 
 ## Save STDOUT and STDERR into one file (%j will expand to become the SLURM job id)
 #SBATCH --output=ex1_%j.log
@@ -49,7 +49,8 @@ if [ -f "$FILE" ]; then
 else 
     echo "# $FILE does not exist. Will install relevant packages."
     julia --project -e 'import Pkg; Pkg.instantiate() '
-    julia --project -e 'import Pluto, Pkg; Pluto.activate_notebook_environment("ex1.jl"); Pkg.instantiate() '
+    # If using a Pluto notebook
+    #julia --project -e 'import Pluto, Pkg; Pluto.activate_notebook_environment("ex1.jl"); Pkg.instantiate() '
     julia --project -e 'import Pkg; Pkg.build() '
     touch $FILE
 fi
@@ -57,8 +58,10 @@ fi
 date
 echo "# About to run Pluto notebook and generate HTML version with outputs, using $SLURM_TASKS_PER_NODE CPU cores on one node"
 # export JULIA_PKG_OFFLINE="true"
-julia --project -t $SLURM_TASKS_PER_NODE -e 'import Pkg, PlutoSliderServer; Pkg.offline(); PlutoSliderServer.export_notebook("ex1.jl")'
-# To just run without saving HTML version
+julia --project=. -t $SLURM_TASKS_PER_NODE -e 'using Weave; weave("ex1.ipynb")'
+# If using a Pluto notebook instead of a Jupyer notebook
+#julia --project -t $SLURM_TASKS_PER_NODE -e 'import Pkg, PlutoSliderServer; Pkg.offline(); PlutoSliderServer.export_notebook("ex1.jl")'
+# Or to just run Pluto notebook without saving HTML version
 #julia -t $SLURM_TASKS_PER_NODE -e 'using Pkg, Pluto; Pkg.offline(); Pluto.activate_notebook_environment("ex1.jl"); Pkg.instantiate(); include("ex1.jl")'  
 echo "Julia exited"
 date

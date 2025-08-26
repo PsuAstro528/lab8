@@ -13,7 +13,7 @@
 #SBATCH --gres=gpu:1
 
 ## Promise that each processor will use no more than 1GB of RAM
-#SBATCH --mem-per-cpu=8GB
+#SBATCH --mem=16GB
 
 ## Save STDOUT and STDERR into one file (%j will expand to become the SLURM job id)
 #SBATCH --output=ex2_%j.log
@@ -48,7 +48,7 @@ if [ -f "$FILE" ]; then
     echo "# $FILE exists.  Assuming no need to instantiate project to install packages."
 else
     echo "# $FILE does not exist. Will install relevant packages."
-    julia --project=. -e 'import Pkg; Pkg.build() '
+    julia --project=. -e 'import Pkg; Pkg.instantiate(); Pkg.build() '
     touch $FILE
 fi
 
