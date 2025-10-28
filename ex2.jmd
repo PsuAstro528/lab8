@@ -3,16 +3,40 @@
 ## Lab 8, Exercise 2
 ## GPU Programming:  Writing Custom Kernels
 
-### Why a Jupyter notebook?
-This exercise is again a Jupyter notebook, rather than Pluto.  Why?  When using the GPU, it is possible to do things that require restarting Julia in order to recover from.  That requires shutting down the Pluto server.  The way that our Pluto servier is run from JupyterLab, that would require killing your whole JupyterLab session and requesting a new one.  This exercise has some custom CUDA kernels.  When I tested it, the notebook worked correctly.  But I encourage students to try tweaking things, and that could easily lead to some errors that require a restart.  So I decided to put this into a Jupyter notebook.  In Jupyter, you can go to the *Kernel* menu and select *Restart Kernel* to get a new kernel and try again.
+### Making sure you have access to a CUDA-enabled GPU for this lab.
+In this lab exercise, we'll verify that we have access to a GPU, see how to write custom GPU kernels, compare the results and performance between the CPU and GPU, and then implement some optimizations.  (This rest of this paragraph is duplicated from Lab 8, Ex 1, but duplicated so students don't forget.)  While most modern laptops have a GPU, not all are designed to support general purpose programming, and most laptop GPUs will be so low power that the benchmarking results won't be very informative.  Therefore, students should run the exercises in this lab on the Lynx cluster, rather than their own system.  For this lab, you will need to request a compute node that has a CUDA-enabled GPU. **There are two options**:
+
+1.  Log in to the Lynx cluster requesting just one CPU core and without requesting a GPU, so you can **submit jobs that request a GPU and inspect the outputs**.  Rather than working direclty in a notebook, you'd submit a short slurm job (e.g., at the shell run sbatch ex1.slurm), and then view the output file  of [this notebook](https://psuastro528.github.io/lab8/ex1.html)  in your web browser rather than running it via the JupyterLab server.
+The good part of this approach is that you'll only need to use a GPU for a few minutes and then make it avaliable to someone else. This may be necessary if there are more students in class than GPUs avaliable to the class.
+
+OR 
+
+2.  **Request dedicated access to a GPU for your entire session** using the Lynx portal. For this option, when you are on the HPC for Astro Jupyter App page to create your JupyterLab session, **click "Enable advanced Slurm options" and then type `--gres=gpu:1`** in the Sbatch options before clicking launch. This allows you to interactively run commands on the GPU. The downside of this option is that it blocks others from accessing "your" GPU until you close your session, even though you're likely not using the GPU most of the time.  If you access a GPU via JupyterLab session at another time, then please be curtious and close GPU sessions promptly after you're done, so that others can access the GPUs.
+
+All students registered for Astro 528 should have access to a GPU as part of the class allocation. 
+However, there may be times when all the GPUs reserved for the class are in use (e.g., during class, near deadlines). While the ICDS Lynx portal allows users to request a JupyterLab session that includes access to a GPU, if everyone tries to do this at once, then some people will likely be blocked out. We can prevent this during class if students either:
+- team up with a partner and share one JupyterLab session, or
+- view the html version of [this notebook](https://psuastro528.github.io/lab8/ex1.html) online rather than running it via the JupyterLab server.
+  
+As usual, there are some questions for you to think about as you work through the exercise. You're welcome to put your responses to questions in *either* this notebook or the ex1_responses.md, whichever is more convenient for you.  If you enter your responces into this notebook, then please remember to use Weave to create a `ex2.jmd` version of that GitHub can compare to the original notebook easily.
+
+### Restarting the Julia kernel
+This exercise has some custom CUDA kernels.  When I tested them, the notebook worked correctly on Lynx.  But I encourage students to try tweaking things, and that could easily lead to some errors that require restarting the Julia kernel to recover from.  If that happens, you can go to the *Kernel* menu and select *Restart Kernel* to get a new Julia kernel and try running the notebook again (from the top).
 
 ### Setting up the GPU
 Remember that when using Jupyter, the order in which you execute cells affects the state of the notebook.  (In contrast to in Pluto, where it figures out the order that cells are to be run, so we can put implementation details at the bottom of the notebook, where they're less distracting.)
 Therefore, we place code in the order that it should be run.  We'll start loading the packages we'll use for writing our custom GPU kernels.
 
 ```julia
+if !(@isdefined path) path = "." end;
+```
+
+```julia
+import Pkg
+Pkg.activate(path) # Tell Julia to use the Project.toml and Manifest.toml specified in the directory
+Pkg.offline() # Tell Julia not to try to find things on the internet
 using KernelAbstractions   # Allows writing code once for different brand GPUs
-using CUDA, CUDAKernels    # for NVIDIA GPUs
+using CUDA                 # for NVIDIA GPUs
 using BenchmarkTools       # for timing
 using Markdown             # for responces
 ```
@@ -24,10 +48,18 @@ CUDA.devices()
 ```
 
 ```julia
+CUDA.driver_version()
+```
+
+```julia
 CUDA.versioninfo()
 ```
 
 We'll make use of the GPU's warpsize later in the exericse, so let's get it now.
+
+```julia
+#CUDA.set_runtime_version!(v"12.6.2"; local_toolkit=true)
+```
 
 ```julia
 warpsize(CUDA.device())
@@ -61,9 +93,12 @@ Initial guess for eccentric anomaly given mean anomaly (M) and eccentricity (ecc
 eMec..40..303D
 """
 function ecc_anom_init_guess_danby(M, ecc)
+    # Match type of ecc to avoid type conversions on GPU.
     k = convert(typeof(ecc),0.85)
-    if(M<zero(M)) M += 2pi end
-    (M<pi) ? M + k*ecc : M - k*ecc;
+    # Julia's pi is irrational, so we need to convert to a type the GPU can use.
+    local my_pi = convert(typeof(M),pi)
+    if(M<zero(M)) M += 2*my_pi end
+    (M<my_pi) ? M + k*ecc : M - k*ecc;
 end
 
 """   update_ecc_anom_laguerre(E, M, ecc)
@@ -90,8 +125,9 @@ function calc_ecc_anom(mean_anom, ecc, tol = default_ecc_anom_tol )
     max_its = default_max_its_laguerre
     @assert zero(ecc) <= ecc < one(ecc)
     @assert tol*100 <= one(tol)
-    #M = mod(mean_anom,convert(typeof(mean_anom),2pi))
-    M = rem2pi(mean_anom,RoundNearest)
+    # Julia's pi is irrational, so we need to convert to a type the GPU can use.
+    M = mod(mean_anom,convert(typeof(mean_anom),2*pi))
+    #M = rem2pi(mean_anom,RoundNearest)
     E = ecc_anom_init_guess_danby(M,ecc)
     # Slight optimization from our original CPU code here, to tell the GPU to try to unroll the first several itterations of the for loop. 
     #for i in 1:max_its
@@ -187,7 +223,7 @@ end
 ```
 
 ```julia
-n_obs = 1_000_000
+n_obs = 10_000
 time_span_in_years = 1
 obs_data = generate_obs_data(time_span=time_span_in_years, num_obs=n_obs, param=θ_true, σ_obs=1.0, model=calc_rv_kepler);
 ```
@@ -214,10 +250,14 @@ First, we'll make sure that the CPU kernel we generated with KernelAbstractions 
 ```julia
 output_cpu = similar(obs_data.t)
 cpu_event = cpu_kernel_calc_rv_circ!(output_cpu, obs_data.t, θ_true, ndrange=size(obs_data.t))
-wait(cpu_event)
+KernelAbstractions.synchronize( CPU() )
 ```
 
-Now we'll try performing the same calculation on the GPU.  We generate a GPU kernel for NVIDIA GPUs by passing `CUDADevice()` instead of `CPU()`.  We'll specify a workgroup size equal to the warpsize on our GPUs.  
+Now we'll try performing the same calculation on the GPU.  We generate a GPU kernel for NVIDIA GPUs by passing `CUDABackend()` instead of `CPU()`.  We'll specify a workgroup size equal to the warpsize on our GPUs.  
+
+```julia
+backend_cpu = get_backend(obs_data.t)
+```
 
 ```julia
 output_gpu_d = CUDA.zeros(length(obs_data.t));
@@ -225,12 +265,16 @@ obs_times_d = cu(obs_data.t);
 ```
 
 ```julia
-gpu_kernel_calc_rv_circ! = calc_rv_circ_kernel(CUDADevice(), 32)
+backend_gpu = get_backend(output_gpu_d)
+```
+
+```julia
+gpu_kernel_calc_rv_circ! = calc_rv_circ_kernel(backend_gpu, 32)
 ```
 
 ```julia
 gpu_event = gpu_kernel_calc_rv_circ!(output_gpu_d, obs_times_d, θ_true, ndrange=size(obs_times_d))
-wait(gpu_event)
+KernelAbstractions.synchronize(backend_gpu)
 ```
 
 ## Accuracy of GPU calculations
@@ -252,7 +296,7 @@ Why?  Look back at where we allocated `obs_times_d` and `output_gpu_d`.  `cu` de
 obs_times_d = convert(CuArray{Float64,1},obs_data.t);
 output_gpu_d64 = CUDA.zeros(Float64,length(obs_data.t));
 gpu_event = gpu_kernel_calc_rv_circ!(output_gpu_d64, obs_times_d, θ_true, ndrange=size(obs_times_d))
-wait(gpu_event)
+KernelAbstractions.synchronize(backend_gpu)
 maximum(abs.(collect(output_gpu_d64).-output_cpu))
 ```
 
@@ -266,21 +310,21 @@ num_obs_to_eval = length(obs_data.t)
 ```
 
 ```julia
-@benchmark  wait(cpu_kernel_calc_rv_circ!($output_cpu, $obs_data.t, $θ_true, ndrange=$num_obs_to_eval )) seconds=1
+@benchmark  (cpu_kernel_calc_rv_circ!($output_cpu, $obs_data.t, $θ_true, ndrange=$num_obs_to_eval ); KernelAbstractions.synchronize(backend_cpu) ) seconds=1
 ```
 
 ```julia
-@benchmark wait(gpu_kernel_calc_rv_circ!($output_gpu_d64, $obs_times_d, $θ_true, ndrange=$num_obs_to_eval)) seconds=1
+@benchmark  (gpu_kernel_calc_rv_circ!($output_gpu_d64, $obs_times_d, $θ_true, ndrange=$num_obs_to_eval);  KernelAbstractions.synchronize(backend_gpu) )  seconds=1
 ```
 
 2a.  How much faster was performing the computations on the GPU than on the CPU? 
 
 ```julia
-response_2a = missing # md"Insert response"
+response_2a = missing # md"Insert response here or in ex2_responses.md"
 ```
 
 ## Performance as a function of workgroup size
-When we generate a kernel to run on the GPU, the workgroup size can make a significant difference in the performance.  My understanding is that the workgroup size is equivalent to the block size on NVIDIA GPUs.  response_2a = missing # md"Insert response"
+When we generate a kernel to run on the GPU, the workgroup size can make a significant difference in the performance.  My understanding is that the workgroup size is equivalent to the block size on NVIDIA GPUs.  
 
 2b.  What do you predict for the compute time for the same GPU kernel, except with the workgroup size set to 1?
 
@@ -289,11 +333,11 @@ response_2b = missing # md"Insert response"
 ```
 
 ```julia
-gpu_kernel_calc_rv_circ_alt! = calc_rv_circ_kernel(CUDADevice(), 1)
+gpu_kernel_calc_rv_circ_alt! = calc_rv_circ_kernel(backend_gpu, 1)
 ```
 
 ```julia
-@benchmark wait(gpu_kernel_calc_rv_circ_alt!($output_gpu_d, $obs_times_d, $θ_true, ndrange=$num_obs_to_eval)) seconds=1
+@benchmark ( gpu_kernel_calc_rv_circ_alt!($output_gpu_d, $obs_times_d, $θ_true, ndrange=$num_obs_to_eval); KernelAbstractions.synchronize(backend_gpu) )  seconds=1
 ```
 
 2c.  How did the performance with a workgrop size of 1 compare to your predictions?  
@@ -308,13 +352,13 @@ If you're likely to be using a GPU for parallelizing your project code, then try
 So far, we've been benchmarking a relatively simple kernel (some arithmetic and one trig function).  Now, we'll try switching to computing the radial velocity assuming a Keplerian orbit.  First, we'll use a CPU version of the kernel.  
 
 ```julia
-@benchmark wait(cpu_kernel_calc_rv_kepler!($output_cpu, $obs_data.t, $θ_true, ndrange=size($obs_data.t))) seconds=1
+@benchmark ( cpu_kernel_calc_rv_kepler!($output_cpu, $obs_data.t, $θ_true, ndrange=size($obs_data.t));  KernelAbstractions.synchronize(backend_gpu) ) seconds=1
 ```
 
 Next, we'll create a GPU kernel to benchmark the Keplerian calculation on the GPU.
 
 ```julia
-gpu_kernel_calc_rv_kepler! = calc_rv_kepler_kernel(CUDAKernels.CUDADevice(), 32)
+gpu_kernel_calc_rv_kepler! = calc_rv_kepler_kernel(backend_gpu, 32)
 ```
 
 2d.   Before you run the benchmarks, what do you expect for the GPU performance if we use a workgroup size equal to the warpsize?  What if we use a workgroup size of 1?  Explain your reasoning.  
@@ -324,49 +368,18 @@ response_2d = missing # md"Insert response"
 ```
 
 ```julia
-@benchmark wait(gpu_kernel_calc_rv_kepler!($output_gpu_d, $obs_times_d, $θ_true, ndrange=size($obs_times_d))) seconds=1
+@benchmark ( gpu_kernel_calc_rv_kepler!($output_gpu_d, $obs_times_d, $θ_true, ndrange=size($obs_times_d)); KernelAbstractions.synchronize(backend_gpu) ) seconds=1
 ```
 
 ```julia
-gpu_kernel_calc_rv_kepler_alt! = calc_rv_kepler_kernel(CUDAKernels.CUDADevice(), 1)
-@benchmark wait(gpu_kernel_calc_rv_kepler_alt!($output_gpu_d, $obs_times_d, $θ_true, ndrange=size($obs_times_d))) seconds=1
+gpu_kernel_calc_rv_kepler_alt! = calc_rv_kepler_kernel(backend_gpu, 1)
+@benchmark ( gpu_kernel_calc_rv_kepler_alt!($output_gpu_d, $obs_times_d, $θ_true, ndrange=size($obs_times_d)); KernelAbstractions.synchronize(backend_gpu) ) seconds=1
 ```
 
 2e.  How did the benchmarking results for the GPU version compare to your expectations?  What could explain the differences? 
 
 ```julia
 response_2e = missing # md"Insert response"
-```
-
-## High-level GPU Programming with FLoops
-
-In [Lab 6](https://github.com/PsuAstro528/lab6-start), we saw how we could write parallel for either serial, multithreaded or distributed architectures using [FLoops.jl](https://juliafolds.github.io/FLoops.jl/dev/).   The [FoldsCUDA.jl](https://github.com/JuliaFolds/FoldsCUDA.jl) package provided an executor that allows FLoops to compile code for the GPU.  THe usual limitations about GPU kernels not being able to allocate memory still apply.  In order for the GPU kernel to be allowed to write to GPU arrays, we use the `referencable()` function and an unusual syntax shown below.  
-
-```julia
-using FLoops
-using CUDA, FoldsCUDA
-using Referenceables: referenceable
-```
-
-```julia
-function calc_rv_kepler_floops(output::AbstractArray, times::AbstractArray, param; ex =  ThreadedEx() )
-     @floop ex for (t_i,rv_i) in zip(referenceable(times),referenceable(output))
-        rv_i[] = calc_rv_kepler(t_i[],param=param)
-    end
-    output
-end
-```
-
-```julia
-output_cpu_floops = similar(obs_data.t)
-calc_rv_kepler_floops(output_cpu_floops,obs_data.t,θ_true)
-all(output_cpu_floops .≈ output_cpu)
-```
-
-```julia
-output_gpu_floops = CUDA.similar(obs_times_d)
-calc_rv_kepler_floops(output_gpu_floops,obs_times_d,θ_true, ex=CUDAEx())
-all(collect(output_gpu_floops) .≈ output_cpu)
 ```
 
 ## Improving performance by performing reductions on GPU
@@ -401,7 +414,8 @@ function cpu_calc_chisq_kepler(t::AbstractArray, rv_obs::AbstractArray, σ::Abst
     @assert length(t) == length(rv_obs) == length(σ)
     @assert ismissing(workspace) || length(t) == length(workspace)
     rv_pred = ismissing(workspace) ? similar(rv_obs) : workspace
-    wait(cpu_kernel_calc_rv_kepler!(rv_pred, t, θ, ndrange=size(t)))
+    cpu_kernel_calc_rv_kepler!(rv_pred, t, θ, ndrange=size(t))
+    KernelAbstractions.synchronize(CPU())
     χ² = sum(((rv_pred.-rv_obs)./σ).^2)
 end
 
@@ -565,13 +579,14 @@ output_many_models_cpu = zeros(n_obs_small, num_models);
 ```
 
 ```julia
-wait(cpu_kernel_calc_rv_kepler_many_models!(output_many_models_cpu, obs_data_small.t, θ_eval.P, θ_eval.K, θ_eval.e, θ_eval.ω, θ_eval.M0, ndrange=( n_obs_small, num_models ) ))
+cpu_kernel_calc_rv_kepler_many_models!(output_many_models_cpu, obs_data_small.t, θ_eval.P, θ_eval.K, θ_eval.e, θ_eval.ω, θ_eval.M0, ndrange=( n_obs_small, num_models ) )
+KernelAbstractions.synchronize(backend_cpu)
 ```
 
 Now, we'll create a GPU version of the kernel, allocate the memory for it to store its results in, load the model parameters to be evaluated onto the GPU, and test Ghe CPU kernel.
 
 ```julia
-gpu_kernel_calc_rv_kepler_many_models! = calc_rv_kepler_kernel_many_models(CUDAKernels.CUDADevice(), 32)
+gpu_kernel_calc_rv_kepler_many_models! = calc_rv_kepler_kernel_many_models(backend_gpu, 32)
 ```
 
 ```julia
@@ -583,7 +598,8 @@ output_many_models_gpu = CUDA.zeros(Float64,n_obs_small, num_models);
 ```
 
 ```julia
-wait(gpu_kernel_calc_rv_kepler_many_models!(output_many_models_gpu, obs_data_small_gpu.t, θ_eval_gpu.P, θ_eval_gpu.K, θ_eval_gpu.e, θ_eval_gpu.ω, θ_eval_gpu.M0, ndrange=( n_obs_small, num_models ) ))
+gpu_kernel_calc_rv_kepler_many_models!(output_many_models_gpu, obs_data_small_gpu.t, θ_eval_gpu.P, θ_eval_gpu.K, θ_eval_gpu.e, θ_eval_gpu.ω, θ_eval_gpu.M0, ndrange=( n_obs_small, num_models ) )
+KernelAbstractions.synchronize(backend_gpu)
 ```
 
 A quick check that the results are consistent given expected limitations of floating point arithmetic.
@@ -599,11 +615,11 @@ response_2j = missing # md"Insert response"
 ```
 
 ```julia
-@benchmark wait(cpu_kernel_calc_rv_kepler_many_models!($output_many_models_cpu, $obs_data_small.t, $θ_eval.P, $θ_eval.K, $θ_eval.e, $θ_eval.ω, $θ_eval.M0, ndrange=( n_obs_small, num_models ) )) seconds=1
+@benchmark (cpu_kernel_calc_rv_kepler_many_models!($output_many_models_cpu, $obs_data_small.t, $θ_eval.P, $θ_eval.K, $θ_eval.e, $θ_eval.ω, $θ_eval.M0, ndrange=( n_obs_small, num_models ) );  KernelAbstractions.synchronize(backend_cpu) ) seconds=1
 ```
 
 ```julia
-@benchmark wait(gpu_kernel_calc_rv_kepler_many_models!($output_many_models_gpu, $obs_data_small_gpu.t, $θ_eval_gpu.P, $θ_eval_gpu.K, $θ_eval_gpu.e, $θ_eval_gpu.ω, $θ_eval_gpu.M0, ndrange=( n_obs_small, num_models ) )) seconds=1
+@benchmark (gpu_kernel_calc_rv_kepler_many_models!($output_many_models_gpu, $obs_data_small_gpu.t, $θ_eval_gpu.P, $θ_eval_gpu.K, $θ_eval_gpu.e, $θ_eval_gpu.ω, $θ_eval_gpu.M0, ndrange=( n_obs_small, num_models ) ); KernelAbstractions.synchronize(backend_gpu) ) seconds=1
 ```
 
 2k.  How did the benchmarking results compare to your prediction?  What might explain any differences?
@@ -620,7 +636,8 @@ function cpu_calc_chisq_kepler_many_models(t::AbstractArray, rv_obs::AbstractArr
     @assert length(t) == length(rv_obs) == length(σ)
     @assert ismissing(workspace) || size(workspace) == (length(t), length(first(θ)) )
     rv_pred = ismissing(workspace) ? zeros(eltype(rv_obs),length(t),length(first(θ))) : workspace
-    wait(cpu_kernel_calc_rv_kepler_many_models!(rv_pred, t, θ.P, θ.K, θ.e, θ.ω, θ.M0, ndrange=(length(t), length(first(θ))) ))
+    cpu_kernel_calc_rv_kepler_many_models!(rv_pred, t, θ.P, θ.K, θ.e, θ.ω, θ.M0, ndrange=(length(t), length(first(θ))) )
+    KernelAbstractions.synchronize(CPU())
     χ² = vec(sum(((rv_pred.-rv_obs)./σ).^2, dims=1))
 end
 
@@ -689,6 +706,18 @@ end
 
 ```julia
 @elapsed map(n->calc_chisq_rv_kepler_cpu_simple(obs_data_small,get_nth_as_namedtuple(θ_eval,n)), 1:length(first(θ_eval)) )
+```
+
+```julia
+```
+
+```julia
+```
+
+```julia
+```
+
+```julia
 ```
 
 ```julia

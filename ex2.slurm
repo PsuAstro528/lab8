@@ -54,7 +54,8 @@ fi
 
 date
 echo "About to start Julia, using $SLURM_TASKS_PER_NODE CPU cores on one node"
-julia --project=. -t $SLURM_TASKS_PER_NODE -e 'using Weave; weave("ex2.ipynb")'
+julia --project=. -t $SLURM_TASKS_PER_NODE -e 'using Weave; weave("ex2.ipynb")'                  # To create html version
+# julia --project=. -t $SLURM_TASKS_PER_NODE -e 'using Weave; convert_doc("ex2.ipynb","ex2.jmd")'  # To create Markdown version
 # To run without writing a markdown version
 # julia --project=. -t $SLURM_TASKS_PER_NODE -e 'include("ex2_run_nb.jl")'  
 echo "Julia exited"

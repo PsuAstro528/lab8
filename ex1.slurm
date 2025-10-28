@@ -58,10 +58,11 @@ fi
 date
 echo "# About to run Pluto notebook and generate HTML version with outputs, using $SLURM_TASKS_PER_NODE CPU cores on one node"
 # export JULIA_PKG_OFFLINE="true"
-julia --project=. -t $SLURM_TASKS_PER_NODE -e 'using Weave; weave("ex1.ipynb")'
-# If using a Pluto notebook instead of a Jupyer notebook
-#julia --project -t $SLURM_TASKS_PER_NODE -e 'import Pkg, PlutoSliderServer; Pkg.offline(); PlutoSliderServer.export_notebook("ex1.jl")'
-# Or to just run Pluto notebook without saving HTML version
-#julia -t $SLURM_TASKS_PER_NODE -e 'using Pkg, Pluto; Pkg.offline(); Pluto.activate_notebook_environment("ex1.jl"); Pkg.instantiate(); include("ex1.jl")'  
+julia --project=. -t $SLURM_TASKS_PER_NODE -e 'using Weave; weave("ex1.ipynb")'                  # To create Html version of outputs
+# julia --project=. -t $SLURM_TASKS_PER_NODE -e 'using Weave; convert_doc("ex1.ipynb","ex1.jmd")'  # To create Markdown version
+## If using a Pluto notebook instead of a Jupyer notebook
+## julia --project -t $SLURM_TASKS_PER_NODE -e 'import Pkg, PlutoSliderServer; Pkg.offline(); PlutoSliderServer.export_notebook("ex1.jl")'
+## Or to just run Pluto notebook without saving HTML version
+## julia -t $SLURM_TASKS_PER_NODE -e 'using Pkg, Pluto; Pkg.offline(); Pluto.activate_notebook_environment("ex1.jl"); Pkg.instantiate(); include("ex1.jl")'  
 echo "Julia exited"
 date

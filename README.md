@@ -13,7 +13,7 @@ For this lab, you will need to request a compute node that has a CUDA-enabled GP
 - Accelerate linear algebra computations with GPU 
 - Recognize what problem sizes and likely to result in acceleration with a GPU for linear algebra
 
-Work through ex1.ipynb, either in the Jupyter notebook (with a classmate or outside of class) or by submitting ex1.slurm and viewing the output html file.  
+Work through ex1.ipynb, either in the Jupyter notebook or by submitting ex1.slurm and viewing the output html file.  
 
 ## Exercise 2:  GPU Computing II: GPU Kernels, Reductions
 ### Goals:  
@@ -21,5 +21,27 @@ Work through ex1.ipynb, either in the Jupyter notebook (with a classmate or outs
 - Improve performance by reducing kernel launches via broadcasting and GPU kernel fusion
 - Improve performance by reducing memory transfers via GPU reductions
 - Recognize what types of problems and problem sizes are likely to result in acceleration with a GPU  when using a custom kernel
-Work through ex2.ipynb, either in the Jupyter notebook (with a classmate or outside of class) or by submitting ex2.slurm and viewing the output html file.  
+Work through ex2.ipynb, either in the Jupyter notebook or by submitting ex2.slurm and viewing the output html file.  
+
+## Submitting your lab
+Saving, adding, commiting, and pushing `ex1.ipynb` and `ex2.ipynb` is useful for sharing the plots created.  However, it's difficult to isolate the changes you made to the notebooks in GitHub due to all the formatting of ipynb files.  Therefore, when you're done with the lab, please also add, commit and push a markdown version of your responces to your repository.
+
+If you entered your responces in `ex1.ipynb` and `ex2.ipynb`, then you can run
+```julia
+julia --project=. -e 'using Weave; convert_doc("ex1.ipynb","ex1.jmd")'
+julia --project=. -e 'using Weave; convert_doc("ex2.ipynb","ex2.jmd")'
+```
+to convert the ipynb files into a jmd files (instead of html files), and then commit and push the `ex?.jmd` files like
+```julia
+git add ex1.jmd ex2.jmd
+git commit -m "Adding markdown version of updated Jupyter notebooks"
+git push
+```
+
+Alternatively, if you entered your responces in `ex1_responces.md` and `ex2_responces.md`, then you can simply 
+```julia
+git add ex1_responces.md ex2_responces.md
+git commit -m "Adding markdown files with responces"
+git push
+```
 
