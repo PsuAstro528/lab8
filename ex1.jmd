@@ -1,0 +1,665 @@
+
+# Astro 528: High-performance Computing for Astrophysics
+## Lab 8, Exercise 1
+## GPU Computing I:  Getting Started & Linear Algebra
+
+### Making sure you have access to a CUDA-enabled GPU for this lab.
+In this lab exercise, we'll verify that we have access to a GPU, learn a little about its properties, and benchmark some simple operations on a GPU to see how performance compares.  While most modern laptops have a GPU, not all are designed to support general purpose programming, and most laptop GPUs will be so low power that the benchmarking results won't be very informative.  Therefore, students should run the exercises in this lab on the Lynx cluster, rather than their own system.  For this lab, you will need to request a compute node that has a CUDA-enabled GPU. **There are two options:**
+
+1.  Log in to the Lynx cluster, requesting just one CPU core and without requesting a GPU, so you can **submit jobs that request a GPU and inspect the outputs**.  Rather than working directly in a notebook, you'd submit a short slurm job (e.g., at the shell run sbatch ex1.slurm), and then view the output file  of [this notebook](https://psuastro528.github.io/lab8/ex1.html)  in your web browser rather than running it via the JupyterLab server.
+The good part of this approach is that you'll only need to use a GPU for a few minutes and then make it available to someone else. This may be necessary if there are more students in class than GPUs available to the class.
+
+OR 
+
+2.  **Request dedicated access to a GPU for your entire session** using the Lynx portal. For this option, when you are on the HPC for Astro Jupyter App page to create your JupyterLab session, **click "Enable advanced Slurm options" and then type `--gres=gpu:1`** in the Sbatch options before clicking launch. This allows you to interactively run commands on the GPU. The downside of this option is that it blocks others from accessing "your" GPU until you close your session, even though you're likely not using the GPU most of the time.  If you access a GPU via JupyterLab session at another time, then please be courteous and close GPU sessions promptly after you're done, so that others can access the GPUs.
+
+All students registered for Astro 528 should have access to a GPU as part of the class allocation. 
+However, there may be times when all the GPUs reserved for the class are in use (e.g., during class, near deadlines). While the ICDS Lynx portal allows users to request a JupyterLab session that includes access to a GPU, if everyone tries to do this at once, then some people will likely be blocked out. We can prevent this during class if students either:
+- team up with a partner and share one JupyterLab session, or
+- view the html version of [this notebook](https://psuastro528.github.io/lab8/ex1.html) online rather than running it via the JupyterLab server.
+  
+As usual, there are some questions for you to think about as you work through the exercise. You're welcome to put your responses to questions in *either* this notebook or the ex1_responses.md, whichever is more convenient for you.  If you enter your responses into this notebook, then please remember to use Weave to create a `ex1.jmd` version of that GitHub can compare to the original notebook easily.
+
+### Why a Jupyter notebook?
+This exercise is again a Jupyter notebook, rather than Pluto.  Why?  When using the GPU, it is possible to do things that require restarting Julia in order to recover.  That requires shutting down the Pluto server.  The way that our Pluto server is run from JupyterLab requires killing your whole JupyterLab session and requesting a new one.  Instead, I decided to put this into a Jupyter notebook.  In Jupyter, you can go to the *Kernel* menu and select *Restart Kernel* to get a new kernel and try again.
+
+### Setting up the GPU
+Remember that when using Jupyter, the order in which you execute cells affects the state of the notebook.  (In contrast to in Pluto, where it figures out the order that cells are to be run, so we can put implementation details at the bottom of the notebook, where they're less distracting.)
+Therefore, we place code in the order that it should be run.  We'll start loading the packages we'll use for writing our custom GPU kernels.
+
+```julia
+if !(@isdefined path) path = "." end;
+```
+
+```julia
+import Pkg
+Pkg.activate(path) # Tell Julia to use the Project.toml and Manifest.toml specified in this lab's directory
+Pkg.offline()      # Tell Julia not to try to find things on the internet
+using CUDA                 # for NVIDIA GPUs
+#CUDA.set_runtime_version!(v"12.6.2"; local_toolkit=true)
+#CUDA.allowscalar(false)
+using BenchmarkTools       # for timing
+using Markdown             # for responces
+using Statistics
+using LinearAlgebra
+using Plots
+using Test
+```
+
+# Properties of your GPU and setup
+First, we'll load the CUDA package (for accessing NVIDIA GPUs) and check that you have access to at least one GPU.
+
+```julia
+CUDA.devices()
+```
+
+If we wanted to check whether our current GPU has some specific capability, then it would be useful to look up it's *compute capability*.
+
+```julia
+[CUDA.capability(dev) for dev in CUDA.devices()]
+```
+
+We can also query specific device attributes. For example:
+
+```julia
+num_mps = CUDA.attribute(first(devices()), CUDA.DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT)  # Number of streaming multiprocessors on GPU
+```
+
+```julia
+CUDA.attribute(first(devices()), CUDA.DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK) # maximum threads per block on this GPU
+```
+
+```julia
+(CUDA.attribute(first(devices()), CUDA.DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_X), 
+CUDA.attribute(first(devices()), CUDA.DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Y), 
+CUDA.attribute(first(devices()), CUDA.DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Z)) # maximum number of blocks in the x, y and z dimensions that CPU can launch kernels with
+```
+
+```julia
+CUDA.attribute(first(devices()), CUDA.DEVICE_ATTRIBUTE_WARP_SIZE) # threads in each warp on this GPU
+```
+
+```julia
+CUDA.attribute(first(devices()), CUDA.DEVICE_ATTRIBUTE_L2_CACHE_SIZE)/1024^2 # Size of this GPU's L2 cache in MB
+```
+
+```julia
+totalmem(first(devices()))/1024^3 # Total GPU RAM (in GB)
+```
+
+# Linear Algebra
+
+First, we'll test and benchmark some basic linear algebra tasks. Because linear algebra is so common, there are efficient libraries for basic linear algebra tasks ([BLAS](https://en.wikipedia.org/wiki/Basic_Linear_Algebra_Subprograms)), solving linear systems ([cuSOLVER](https://docs.nvidia.com/cuda/cusolver/index.html)), and even sparse linear algebra ([cuSPARSE](https://docs.nvidia.com/cuda/cusparse/index.html)) available for GPUs. Julia's rich type interface allows users to access many of the most common functions by writing the same linear algebra expressions as you would write for vectors and matrices on the CPU, but passing vectors and matrices stored on the GPU. (There are also less commonly called library functions which do not have Julia wrappers yet, but can be called explicitly.)
+
+Now, let's create some matrices and arrays on the CPU that we'll use for testing purposes.
+
+```julia
+N = 1*1024
+M = 2*1024;
+```
+
+```julia
+A_h = randn(N,M);
+x_h = randn(M);
+b_h = A_h*x_h;
+```
+
+To perform calculations on a GPU, we'll need to send the data from the CPU to the GPU. The CUDA package provides a datatype `CuArray` for storing arrays in the GPU or *device* memory. Manually specifying when to send data back and forth does provide some extra options that are good for efficiency, but it also requires more care. So instead, we use `CuArray`'s that take care of moving the data between the CPU (or "host") memory system and the GPU (or "device") memory system for us. We can create a 'CuArray' from an existing Array simply with the `cu(.)` function. Then, we can proceed to do arithmetic on them with the same syntax as when using standard Arrays. (Generic programming is amazing!)
+
+```julia
+A_d = cu(A_h);
+x_d = cu(x_h);
+```
+
+```julia
+b_d = A_d*x_d;
+```
+
+First, let's check the type of each variable.
+
+```julia
+typeof(A_d), typeof(x_d), typeof(b_d)
+```
+
+Note that the `cu` function decided to convert the data from `Float64` to `Float32`.  This can provide a non-trivial speed-up for GPU calculations, but also increases the risk that floating-point error may lead to unacceptablely inaccurate results.  
+We'll want to compare the accuracy of the calculations below.
+
+By using two CuArray's as input, the result of the calculation is also stored as a CuArray and left on the GPU.  While it is technically possible to access individual elements, it is quite slow. So when we want to be able to access a whole array, then it will be faster to copy all the data at once to CPU. We can bring the full result back to the host, using `collect(.)`.  Let's compare the two below.
+
+```julia
+@time CUDA.@allowscalar b_d[1]
+@time CUDA.@allowscalar b_d[1]
+@time CUDA.@allowscalar b_d[1];
+```
+
+```julia
+@time b_comp_h = collect(b_d)
+@time b_comp_h = collect(b_d)
+b_d = A_d*x_d;
+@time b_comp_h = collect(b_d);
+```
+
+Next, we'll compare the results. 
+
+**Q1a:**  What do you expect for the maximum difference in any element in `b_h` and `b_d`?
+
+```julia
+response_1a =  missing; # md"Insert your response either here or in ex1_responses.md";
+```
+
+```julia
+maximum(abs.(collect(b_d) .- b_h))
+```
+
+**Q1b:** How did the results compare to your expectations?
+
+```julia
+response_1b = missing;  # md"Insert your response either here or in ex1_responses.md";
+```
+
+One thing to keep in mind is that most "consumer grade" GPUs are designed to only perform single-precision arithmetic.  Even some GPUs that do support double precision are often significantly slower at double precision arithmetic than single precision. The difference is particularly noticeable for consumer grade GPUs and more recent GPUs optimized for machine learning tasks. When we want to upload data to the GPU in double precision, we can specify that explicitly. Below, we will reupload our data to the GPU, but this time using double precision on the GPU, so we can test its accuracy.
+
+```julia
+A_d64 = CuArray{Float64}(A_h)
+x_d64 = CuArray{Float64}(x_h)
+b_d64 = A_d64*x_d64
+maximum(abs.(collect(b_d64) .- b_h))
+```
+
+**Q1c:** After swtiching to 64-bit floating point arithmetic, how do the results compare to your expectations?
+
+```julia
+response_1c = missing
+```
+
+## Benchmarking GPU for Linear Algebra
+Now, we'll do some benchmarking of the CPU vs GPU for basic linear algebra. Note that we'll be able to use the exact same macros to benchmark code running on either the CPU or the GPU. To keep things reasonably fast, we'll specify that we only want Julia to benchmark each calculation a few times.
+
+```julia
+@benchmark b_h_comp = $A_h*$x_h seconds=1
+```
+
+```julia
+@benchmark b_d = $A_d*$x_d seconds=1
+```
+
+The histogram of the time required on the GPU is likely bimodal. What could cause that?  Remember that calls to the GPU run asynchronously. Sometimes, we timed how long to start the calculation on the GPU and return control to the CPU. Othertimes, the GPU kernel couldn't start right away because it was still performing work for the last kernel call, so we had to wait for the last kernel to finish before starting the next one. (It's now possible to launch kernels that use only a fraction of the GPU's multiprocessors, so that multiple kernels are running at once.  But by default, Julia is trying to use all the multiprocessors on the GPU for each calculation.) If we want to benchmark how long it takes for the calculation to complete, we need to tell Julia to wait until the calculation has been completed with the `CUDA.@sync` macro. (This can also be very useful for making sure that there is no risk of variables becoming unsynchronized and overwritten in an order different than what we intended.)
+
+```julia
+@benchmark CUDA.@sync( b_d = $A_d*$x_d) seconds=1
+```
+
+**Q1d:** Looking at the three above histograms, how long does it take to launch the GPU kernel and return flow control to the CPU, without waiting for the GPU tasks to complete?
+
+```julia
+response_1d = missing; # md"Insert your response either here or in ex1_responses.md";
+```
+
+**Q1e:** Again, looking at the last three histograms, how long did it take to complete the calculation and store to an array on the GPU? How does this compare to the cost of launching the kernel? What are the implications for the amount of work you'd want per GPU call in order to make efficient use of the GPU?
+
+```julia
+response_1e = missing; # md"Insert your response either here or in ex1_responses.md";
+```
+
+## Matrix solve
+
+Here, we'll evaluate the speed-up factors for solving a linear system on the GPU, using 32 and 64-bit floating point arithmetic.  In the starter notebook, lines that depend on doing the calculations on the CPU have been commented out.
+
+```julia
+#solve_for_x_h = A_h \ b_h
+#walltime_lu_solve_h = @elapsed solve_for_x_h = A_h \ b_h
+```
+
+```julia
+CUDA.@sync (solve_for_x_d = A_d \ b_d);
+walltime_lu_solve_d = @elapsed (CUDA.@sync solve_for_x_d = A_d \ b_d)
+#walltime_lu_solve_h / walltime_lu_solve_d
+```
+
+```julia
+CUDA.@sync (solve_for_x_d64 = A_d64 \ b_d64);
+walltime_lu_solve_d64 = @elapsed (CUDA.@sync solve_for_x_d64 = A_d64 \ b_d64)
+#walltime_lu_solve_h / walltime_lu_solve_d64
+```
+
+Let's check to make sure that the GPU results are accurate.
+
+```julia
+#@test maximum(abs.(solve_for_x_h .- collect(solve_for_x_d))) < 1e-2
+```
+
+```julia
+#@test maximum(abs.(solve_for_x_h .- collect(solve_for_x_d64))) < 1e-8
+```
+
+## Benchmarking vs problem size
+
+As before, the relative efficiency of the CPU and GPU depends on the problem size. Below, we'll benchmark matrix-vector multiply, matrix-matrix multiply, and solving a linear system as a function of problem size.
+
+In case you're running this as a batch job rather than in an interactive notebook, the figures of benchmarking results will be saved to '*.png' files, so you can inspect them after your jobs finish.
+
+```julia
+n_plot = [2^i for i in 4:10];
+```
+
+```julia
+m_plot = n_plot;
+```
+
+```julia
+function cpu_benchmark_mul_mat_vec(n,m)
+	A = rand(n,m)
+	x = rand(m)
+	@elapsed b = A*x
+end
+```
+
+```julia
+function gpu_benchmark_mul_mat_vec(n,m; eltype=Float64)
+	A_d = CUDA.rand(eltype,n,m)
+	x_d = CUDA.rand(eltype,m)
+	b_d = A_d*x_d
+	b_h = collect(b_d)
+
+	time_init = @elapsed CUDA.@sync begin
+		A_d = CUDA.rand(eltype,n,m)
+		x_d = CUDA.rand(eltype,m)
+	end
+	time_execute = @elapsed CUDA.@sync begin		
+		b_d = A_d*x_d
+    end
+	time_download = @elapsed CUDA.@sync begin
+		b_h = collect(b_d)
+	end
+	time_total = time_init + time_execute + time_download
+	return (; time_total, time_init, time_execute, time_download)
+end
+```
+
+```julia
+gpu_mul_mat_vec_64_results = map((n,m)->gpu_benchmark_mul_mat_vec(n,m), n_plot, m_plot);
+gpu_mul_mat_vec_64_total = map(x->x.time_total,gpu_mul_mat_vec_64_results);
+gpu_mul_mat_vec_64_exec = map(x->x.time_execute,gpu_mul_mat_vec_64_results);
+gpu_mul_mat_vec_32_results = map((n,m)->gpu_benchmark_mul_mat_vec(n,m,eltype=Float32), n_plot,m_plot );
+gpu_mul_mat_vec_32_total = map(x->x.time_total,gpu_mul_mat_vec_32_results);
+gpu_mul_mat_vec_32_exec = map(x->x.time_execute,gpu_mul_mat_vec_32_results);
+```
+
+```julia
+cpu_mul_mat_vec_times_total = map(n->cpu_benchmark_mul_mat_vec(n,n), n_plot );
+```
+
+```julia
+let
+	plt = plot(xscale=:log10, yscale=:log10, legend=:topleft);
+	scatter!(plt, n_plot, cpu_mul_mat_vec_times_total, color=2, label="CPU (total)");
+    plot!(plt, n_plot, cpu_mul_mat_vec_times_total, color=2, label="CPU (total)");
+	scatter!(plt, n_plot, gpu_mul_mat_vec_64_total, color=1, label="GPU (64bit, total)");
+	plot!(plt, n_plot, gpu_mul_mat_vec_64_exec, color=1, label="GPU (64bit, execute)");
+    scatter!(plt, n_plot, gpu_mul_mat_vec_32_total, color=3, label="GPU (32bit, total)");
+	plot!(plt, n_plot, gpu_mul_mat_vec_32_exec, color=3, label="GPU (32bit, execute)");
+    xlabel!(plt, "N: Number of rows in matrix");
+	ylabel!(plt, "Wall time");
+	title!(plt,"CPU vs GPU Performance:\nMatrix (n×m)-Vector (m) Multiply");
+	savefig("benchmarks_mul_mat_vec.png");
+plt
+end
+```
+
+```julia
+function cpu_benchmark_mul_mat_mat(n,m,p)
+	A = rand(n,m)
+	x = rand(m,p)
+	@elapsed b = A*x
+end
+```
+
+```julia
+function gpu_benchmark_mul_mat_mat(n,m,p; eltype=Float64)
+	A_d = CUDA.rand(eltype,n,m)
+	x_d = CUDA.rand(eltype,m,p)
+	b_d = A_d*x_d
+	b_h = collect(b_d)
+
+	time_init = @elapsed CUDA.@sync begin
+		A_d = CUDA.rand(eltype,n,m)
+		x_d = CUDA.rand(eltype,m,p)
+	end
+	time_execute = @elapsed CUDA.@sync begin		
+		b_d = A_d*x_d
+    end
+	time_download = @elapsed CUDA.@sync begin
+		b_h = collect(b_d)
+	end
+	time_total = time_init + time_execute + time_download
+	return (; time_total, time_init, time_execute, time_download)
+end
+```
+
+```julia
+gpu_mul_mat_mat_64_results = map((n,m,p)->gpu_benchmark_mul_mat_mat(n,m ,p), n_plot, m_plot,  n_plot)
+gpu_mul_mat_mat_64_total = map(x->x.time_total,gpu_mul_mat_mat_64_results)
+gpu_mul_mat_mat_64_exec = map(x->x.time_execute,gpu_mul_mat_mat_64_results)
+gpu_mul_mat_mat_32_results = map((n,m,p)->gpu_benchmark_mul_mat_mat(n,m,p,eltype=Float32), n_plot,m_plot,n_plot )
+gpu_mul_mat_mat_32_total = map(x->x.time_total,gpu_mul_mat_mat_32_results)
+gpu_mul_mat_mat_32_exec = map(x->x.time_execute,gpu_mul_mat_mat_32_results);
+```
+
+```julia
+cpu_mul_mat_mat_times_total = map(n->cpu_benchmark_mul_mat_mat(n,n,n), n_plot );
+```
+
+```julia
+let
+	plt = plot(xscale=:log10, yscale=:log10, legend=:topleft);
+	scatter!(plt, n_plot, cpu_mul_mat_mat_times_total, color=2, label="CPU (total)");
+	plot!(plt, n_plot, cpu_mul_mat_mat_times_total, color=2, label="CPU (total)");
+	scatter!(plt, n_plot, gpu_mul_mat_mat_64_total, color=1, label="GPU (64bit, total)");
+	plot!(plt, n_plot, gpu_mul_mat_mat_64_exec, color=1, label="GPU (64bit, execute)");
+	scatter!(plt, n_plot, gpu_mul_mat_mat_32_total, color=3, label="GPU (32bit, total)");
+	plot!(plt, n_plot, gpu_mul_mat_mat_32_exec, color=3, label="GPU (32bit, execute)");
+	xlabel!(plt, "N: Number of rows in first matrix");
+	ylabel!(plt, "Wall time");
+	title!(plt,"CPU vs GPU Performance:\nMatrix (n×m)-Matrix (m×n) Multiply");
+	savefig("benchmarks_mul_mat_mat.png");
+	plt
+end
+```
+
+```julia
+function cpu_benchmark_lu_solve(n,m)
+	A = rand(n,m)
+	b = rand(m)
+	@elapsed x = A\b
+end
+```
+
+```julia
+function gpu_benchmark_lu_solve(n,m; eltype=Float64)
+	A_d = CUDA.rand(eltype,n,m)
+	b_d = CUDA.rand(eltype,m)
+	x_d = A_d\b_d
+	x_h = collect(x_d)
+
+	time_init = @elapsed CUDA.@sync begin
+		A_d = CUDA.rand(eltype,n,m)
+		b_d = CUDA.rand(eltype,m)
+	end
+	time_execute = @elapsed CUDA.@sync begin		
+		x_d = A_d\b_d
+    end
+	time_download = @elapsed CUDA.@sync begin
+		x_h = collect(x_d)
+	end
+	time_total = time_init + time_execute + time_download
+	return (; time_total, time_init, time_execute, time_download)
+end
+```
+
+```julia
+gpu_solve_64_results = map(n->gpu_benchmark_lu_solve(n,n), n_plot)
+gpu_solve_64_total = map(x->x.time_total, gpu_solve_64_results)
+gpu_solve_64_exec = map(x->x.time_execute, gpu_solve_64_results)
+
+gpu_solve_32_results = map(n->gpu_benchmark_lu_solve(n,n,eltype=Float32), n_plot)
+gpu_solve_32_total = map(x->x.time_total, gpu_solve_32_results)
+gpu_solve_32_exec = map(x->x.time_execute, gpu_solve_32_results);
+```
+
+```julia
+#cpu_solve_times_total = map(n->cpu_benchmark_lu_solve(n,n), n_plot);
+```
+
+```julia
+let
+	plt = plot(xscale=:log10, yscale=:log10, legend=:topleft);
+	#scatter!(plt, n_plot, cpu_solve_times_total, color=2, label="CPU (total)");
+	#plot!(plt, n_plot, cpu_solve_times_total, color=2, label="CPU (total)");
+	scatter!(plt, n_plot, gpu_solve_64_total, color=1, label="GPU (64bit, total)");
+	plot!(plt, n_plot, gpu_solve_64_exec, color=1, label="GPU (64bit, execute)");
+	scatter!(plt, n_plot, gpu_solve_32_total, color=3, label="GPU (32bit, total)");
+	plot!(plt, n_plot, gpu_solve_32_exec, color=3, label="GPU (32bit, execute)");
+	xlabel!(plt, "N: Number of rows in first matrix");
+	ylabel!(plt, "Wall time");
+	title!(plt,"CPU vs GPU Performance:\nMatrix (n×n) solve");
+	savefig("benchmarks_solve_mat_mat.png");
+	plt
+end
+```
+
+**Q1f:** For what size linear algebra operations, does the runtime of the CPU and GPU become comparable?
+
+```julia
+response_1f = missing; # md"Insert your response either here or in ex1_responses.md";
+```
+
+### Batched linear algebra operations on GPU via CUBLas
+
+Instead of doing linear algebra on one big matrix to get a speedup, you could use a GPU to perform many small matrix operations in parallel. Below, I demonstrate how to solve a batch of linear systems.
+
+To find other batched functions or to make sense of the outputs, you'll want to look at the documentation for [CUBLAS](https://docs.nvidia.com/cuda/cublas/index.html), the library of CUDA functions that provide these operations. For some problem sizes, the CUBLAS functions are very efficient. For other problem sizes, you can work more efficiently using multiple asynchronous kernel calls or just using multi-threading on the CPU.
+
+```julia
+"""
+`make_inputs_batched_Ax_eq_b(n, num_systems; elty)`
+
+Inputs:
+- `n`: Solve nxn matrices
+- `num_systems`: Number of systems to solve
+- `elty`: type of arrays to solve (Float64)
+Outputs:
+
+NamedTuple with arrays containing `num_systems` values for each of `A`, `x` and `b` where each `A x = b` 
+"""
+function make_inputs_batched_Ax_eq_b(n::Integer, m::Integer, num_systems::Integer; elty::Type = Float64)
+    k = 1               # CUDA uses a nx1 matrix instead of a vector	
+    A = [ begin
+		R = rand(elty,n,m)
+		Q = R'*R
+		(Q'+Q)/2
+	end for i in 1:num_systems]
+	x = [ rand(elty,m,k) for i in 1:num_systems]
+	b = [ A[i]*x[i] for i in 1:num_systems]
+	return (;A, x, b)
+end
+```
+
+```julia
+"""
+`copy_array_of_arrays_to_gpu(A; force_sync)`
+
+Input:
+- `A`:  Array of 2-darrays of numbers, all stored on the host
+- `force_sync`: Synchronize before returning (false)
+Output:
+- CuArray of 2-d CuArrays of data, all stored on the GPU
+"""
+function copy_array_of_arrays_to_gpu(A::TArrayOuter; force_sync::Bool = false) where { TVal<:Number, TArrayInner<: AbstractArray{TVal}, TArrayOuter<: AbstractArray{TArrayInner,1} }
+	elty = TVal
+	# Allocate device arrays of matrices 
+	d_A = CuArray{elty, 2}[]
+    # Move each array to GPU
+	for i in 1:length(A)
+       push!(d_A,CuArray(A[i]))
+	end
+	if force_sync
+		CUDA.@sync d_A
+	end
+	return d_A
+end
+```
+
+```julia
+num_systems = 2*num_mps
+```
+
+```julia
+n_batched_matrices = 64
+m_batched_matrices = 16
+```
+
+```julia
+A, x, b = make_inputs_batched_Ax_eq_b(n_batched_matrices,m_batched_matrices,num_systems);
+```
+
+```julia
+d_A = copy_array_of_arrays_to_gpu(A);
+```
+
+```julia
+d_b = copy_array_of_arrays_to_gpu(b);
+```
+
+```julia
+output_qr_d, output_x_d, output_flag_d = CUBLAS.gels_batched('N', d_A, d_b);
+```
+
+```julia
+CUDA.@sync output_flag_d;
+```
+
+```julia
+@test all(collect(output_flag_d).==0)
+```
+
+```julia
+CUDA.@sync output_x_d
+maximum(map(i->maximum(abs.(x[i].-collect(output_x_d[i]))), 1:num_systems))
+```
+
+Now we'll plot benchmarks as a function of the number of systems to solve for a given matrix size. (You can experiment by making the matrices smaller, but if you try to make them much bigger, then you risk crashing the GPU and having to start over.)
+
+```julia
+function cpu_benchmark_gels(n, m, num_systems)
+	A, x, b = make_inputs_batched_Ax_eq_b(n, m, num_systems)
+	@elapsed map(i->qr(A[i])\b[i], 1:num_systems)
+end
+```
+
+```julia
+function gpu_benchmark_gels(n, m, num_systems; elty=Float64)
+    # create input data
+    A, x, b = make_inputs_batched_Ax_eq_b(n, m, num_systems, elty=elty)
+    # copy to GPU
+    d_A = copy_array_of_arrays_to_gpu(A)
+    d_b = copy_array_of_arrays_to_gpu(b)
+
+	CUDA.@sync output_qr_d, output_x_d, output_flag_d = CUBLAS.gels_batched!('N', d_A, d_b)
+	
+    return @elapsed ( CUDA.@sync (CUBLAS.gels_batched!('N', d_A, d_b)) )
+end
+```
+
+```julia
+num_systems_plot = [2^i for i in 1:11]
+n_matrix_size = 64
+m_matrix_size = 16
+
+c_bench = map(n -> cpu_benchmark_gels(n_matrix_size, m_matrix_size, n), num_systems_plot)
+g_bench_64 = map(n -> gpu_benchmark_gels(n_matrix_size, m_matrix_size, n, elty=Float64), num_systems_plot)
+g_bench_32 = map(n -> gpu_benchmark_gels(n_matrix_size, m_matrix_size, n, elty=Float32), num_systems_plot);
+```
+
+```julia
+let
+	plt = plot(xscale=:log10, yscale=:log10, legend=:topleft);
+	scatter!(plt, num_systems_plot, c_bench, color=2, label="CPU");
+	plot!(plt, num_systems_plot, c_bench, color=2, label="CPU");
+	scatter!(plt, num_systems_plot, g_bench_64, color=1, label="GPU (64bit)");
+	plot!(plt, num_systems_plot, g_bench_64, color=1, label="GPU (64bit)");
+	scatter!(plt, num_systems_plot, g_bench_32, color=3, label="GPU (32bit)");
+	plot!(plt, num_systems_plot, g_bench_32, color=3, label="GPU (32bit)");
+	xlabel!(plt, "Number of systems");
+	ylabel!(plt, "Wall time");
+	title!(plt,"CPU vs GPU Performance: Batch linear solves");
+	savefig("benchmarks_batched_gels_128x128.png");
+	plt
+end
+```
+
+**Q1g:** How large a batch of 64x16 systems does the GPU need before it is faster than solving the same number and size systems on the CPU? By what factor is the GPU faster (once you have a large enough number of systems)?
+
+```julia
+response_1g = missing; # md"Insert your response either here or in ex1_responses.md";
+```
+
+**Q1h:** Try reducing the size of the linear systems to 16x2. Now, how large a batch of systems does the GPU need before it is faster than solving the same number and size systems on the CPU? By what factor is the GPU faster (once you have a large enough number of systems)?
+
+```julia
+num_systems_plot = [2^i for i in 1:10]
+n_matrix_size = 16
+m_matrix_size = 2
+
+c_bench = map(n -> cpu_benchmark_gels(n_matrix_size, m_matrix_size, n), num_systems_plot)
+g_bench_64 = map(n -> gpu_benchmark_gels(n_matrix_size, m_matrix_size, n, elty=Float64), num_systems_plot)
+g_bench_32 = map(n -> gpu_benchmark_gels(n_matrix_size, m_matrix_size, n, elty=Float32), num_systems_plot);
+```
+
+```julia
+let
+	plt = plot(xscale=:log10, yscale=:log10, legend=:topleft);
+	scatter!(plt, num_systems_plot, c_bench, color=2, label="CPU");
+	plot!(plt, num_systems_plot, c_bench, color=2, label="CPU");
+	scatter!(plt, num_systems_plot, g_bench_64, color=1, label="GPU (64bit)");
+	plot!(plt, num_systems_plot, g_bench_64, color=1, label="GPU (64bit)");
+	scatter!(plt, num_systems_plot, g_bench_32, color=3, label="GPU (32bit)");
+	plot!(plt, num_systems_plot, g_bench_32, color=3, label="GPU (32bit)");
+	xlabel!(plt, "Number of systems");
+	ylabel!(plt, "Wall time");
+	title!(plt,"CPU vs GPU Performance: Batch linear solves");
+	savefig("benchmarks_batched_gels_40x40.png");
+	plt
+end
+```
+
+```julia
+response_1h = missing; # md"Insert your response either here or in ex1_responses.md";
+```
+
+**Q1i:** Try reducing the size of the linear systems to 8x8. Now, how does the GPU performance compare to the CPU performance?
+
+```julia
+num_systems_plot = [2^i for i in 1:12]
+n_matrix_size = 8
+m_matrix_size = 8
+
+c_bench = map(n -> cpu_benchmark_gels(n_matrix_size, m_matrix_size, n), num_systems_plot)
+g_bench_64 = map(n -> gpu_benchmark_gels(n_matrix_size, m_matrix_size, n, elty=Float64), num_systems_plot)
+g_bench_32 = map(n -> gpu_benchmark_gels(n_matrix_size, m_matrix_size, n, elty=Float32), num_systems_plot);
+```
+
+```julia
+let
+	plt = plot(xscale=:log10, yscale=:log10, legend=:topleft);
+	scatter!(plt, num_systems_plot, c_bench, color=2, label="CPU");
+	plot!(plt, num_systems_plot, c_bench, color=2, label="CPU");
+	scatter!(plt, num_systems_plot, g_bench_64, color=1, label="GPU (64bit)");
+	plot!(plt, num_systems_plot, g_bench_64, color=1, label="GPU (64bit)");
+	scatter!(plt, num_systems_plot, g_bench_32, color=3, label="GPU (32bit)");
+	plot!(plt, num_systems_plot, g_bench_32, color=3, label="GPU (32bit)");
+	xlabel!(plt, "Number of systems");
+	ylabel!(plt, "Wall time");
+	title!(plt,"CPU vs GPU Performance: Batch linear solves");
+	savefig("benchmarks_batched_gels_10x10.png");
+	plt
+end
+```
+
+```julia
+response_1i = missing; # md"Insert your response either here or in ex1_responses.md";
+```
+
+**Q1j:** Does your project involve a significant amount of time performing linear algebra? If so, are there a few very large matrix operations? Are there many small matrix operations? Would it make sense to use a GPU for the linear algebra in your project? Explain your reasoning. (Feel free to create your own benchmarks based on an operation more similar to what is needed for your project.)
+
+```julia
+response_1j = missing; # md"Insert your response either here or in ex1_responses.md";
+```
+
+This line creates the ex1.jmd file.
+
+```julia
+using Weave; convert_doc("ex1.ipynb","ex1.jmd");
+```
+
+```julia
+```
