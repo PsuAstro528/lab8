@@ -4,21 +4,21 @@
 ## GPU Programming:  Writing Custom Kernels
 
 ### Making sure you have access to a CUDA-enabled GPU for this lab.
-In this lab exercise, we'll verify that we have access to a GPU, see how to write custom GPU kernels, compare the results and performance between the CPU and GPU, and then implement some optimizations.  (This rest of this paragraph is duplicated from Lab 8, Ex 1, but duplicated so students don't forget.)  While most modern laptops have a GPU, not all are designed to support general purpose programming, and most laptop GPUs will be so low power that the benchmarking results won't be very informative.  Therefore, students should run the exercises in this lab on the Lynx cluster, rather than their own system.  For this lab, you will need to request a compute node that has a CUDA-enabled GPU. **There are two options**:
+In this lab exercise, we'll verify that we have access to a GPU, see how to write custom GPU kernels, compare the results and performance between the CPU and GPU, and then implement some optimizations.  (The rest of this paragraph is duplicated from Lab 8, Ex 1, but duplicated so students don't forget.)  While most modern laptops have a GPU, not all are designed to support general purpose programming, and most laptop GPUs will be so low power that the benchmarking results won't be very informative.  Therefore, students should run the exercises in this lab on the Lynx cluster, rather than their own system.  For this lab, you will need to request a compute node that has a CUDA-enabled GPU. **There are two options**:
 
-1.  Log in to the Lynx cluster requesting just one CPU core and without requesting a GPU, so you can **submit jobs that request a GPU and inspect the outputs**.  Rather than working direclty in a notebook, you'd submit a short slurm job (e.g., at the shell run sbatch ex1.slurm), and then view the output file  of [this notebook](https://psuastro528.github.io/lab8/ex1.html)  in your web browser rather than running it via the JupyterLab server.
-The good part of this approach is that you'll only need to use a GPU for a few minutes and then make it avaliable to someone else. This may be necessary if there are more students in class than GPUs avaliable to the class.
+1.  Log in to the Lynx cluster, requesting just one CPU core and without requesting a GPU, so you can **submit jobs that request a GPU and inspect the outputs**.  Rather than working directly in a notebook, you'd submit a short slurm job (e.g., at the shell run sbatch ex1.slurm), and then view the output file  of [this notebook](https://psuastro528.github.io/lab8/ex1.html)  in your web browser rather than running it via the JupyterLab server.
+The good part of this approach is that you'll only need to use a GPU for a few minutes and then make it available to someone else. This may be necessary if there are more students in class than GPUs available to the class.
 
 OR 
 
-2.  **Request dedicated access to a GPU for your entire session** using the Lynx portal. For this option, when you are on the HPC for Astro Jupyter App page to create your JupyterLab session, **click "Enable advanced Slurm options" and then type `--gres=gpu:1`** in the Sbatch options before clicking launch. This allows you to interactively run commands on the GPU. The downside of this option is that it blocks others from accessing "your" GPU until you close your session, even though you're likely not using the GPU most of the time.  If you access a GPU via JupyterLab session at another time, then please be curtious and close GPU sessions promptly after you're done, so that others can access the GPUs.
+2.  **Request dedicated access to a GPU for your entire session** using the Lynx portal. For this option, when you are on the HPC for Astro Jupyter App page to create your JupyterLab session, **click "Enable advanced Slurm options" and then type `--gres=gpu:1`** in the Sbatch options before clicking launch. This allows you to interactively run commands on the GPU. The downside of this option is that it blocks others from accessing "your" GPU until you close your session, even though you're likely not using the GPU most of the time.  If you access a GPU via JupyterLab session at another time, then please be courteous and close GPU sessions promptly after you're done, so that others can access the GPUs.
 
 All students registered for Astro 528 should have access to a GPU as part of the class allocation. 
 However, there may be times when all the GPUs reserved for the class are in use (e.g., during class, near deadlines). While the ICDS Lynx portal allows users to request a JupyterLab session that includes access to a GPU, if everyone tries to do this at once, then some people will likely be blocked out. We can prevent this during class if students either:
 - team up with a partner and share one JupyterLab session, or
 - view the html version of [this notebook](https://psuastro528.github.io/lab8/ex1.html) online rather than running it via the JupyterLab server.
   
-As usual, there are some questions for you to think about as you work through the exercise. You're welcome to put your responses to questions in *either* this notebook or the ex1_responses.md, whichever is more convenient for you.  If you enter your responces into this notebook, then please remember to use Weave to create a `ex2.jmd` version of that GitHub can compare to the original notebook easily.
+As usual, there are some questions for you to think about as you work through the exercise. You're welcome to put your responses to questions in *either* this notebook or the ex2_responses.md, whichever is more convenient for you.  If you enter your responses into this notebook, then please remember to use Weave to create a `ex2.jmd` version of that GitHub can compare to the original notebook easily.
 
 ### Restarting the Julia kernel
 This exercise has some custom CUDA kernels.  When I tested them, the notebook worked correctly on Lynx.  But I encourage students to try tweaking things, and that could easily lead to some errors that require restarting the Julia kernel to recover from.  If that happens, you can go to the *Kernel* menu and select *Restart Kernel* to get a new Julia kernel and try running the notebook again (from the top).
@@ -66,7 +66,7 @@ warpsize(CUDA.device())
 ```
 
 ## CPU version of code to run in parallel 
-We'll write two functions that we'll convert into GPU kernels.  The first, `calc_rv_circ`, will be a simple function, so we keep things simple.  The second, `calc_rv_kepler`, will call other several user-written functions.  We'll even place the code to solve Kepler's equation in a module to help with code maintainability.
+We'll write two functions that we'll convert into GPU kernels.  The first, `calc_rv_circ`, will be a simple function, so we keep things simple.  The second, `calc_rv_kepler`, will call several other user-written functions.  We'll even place the code to solve Kepler's equation in a module to help with code maintainability.
 
 ```julia
 function calc_rv_circ(t::Real; param::NamedTuple )
@@ -81,7 +81,7 @@ end
 ### Code for computing radial velocity of a Keplerian orbit
 
 ```julia
-"Solve Computing Eccentric Anomaly from Mean Anomally via Kepler's Equation"
+"Solve Computing Eccentric Anomaly from Mean Anomaly via Kepler's Equation"
 module KeplerEqn
 using KernelAbstractions  # since we'll use KernelAbstractions to get slightly better performance.
 export calc_ecc_anom
@@ -129,7 +129,7 @@ function calc_ecc_anom(mean_anom, ecc, tol = default_ecc_anom_tol )
     M = mod(mean_anom,convert(typeof(mean_anom),2*pi))
     #M = rem2pi(mean_anom,RoundNearest)
     E = ecc_anom_init_guess_danby(M,ecc)
-    # Slight optimization from our original CPU code here, to tell the GPU to try to unroll the first several itterations of the for loop. 
+    # Slight optimization from our original CPU code here, to tell the GPU to try to unroll the first several iterations of the for loop. 
     #for i in 1:max_its
     KernelAbstractions.Extras.@unroll 6 for i in 1:max_its
        E_old = E
@@ -163,7 +163,7 @@ end
 ```
 
 ## Writing GPU kernels with KernelAbstractions.jl
-The CPU version of `calc_rv_circ_kernel` and `calc_rv_kepler_kernel` operate on scalars.  For GPU calculations to be efficient, we need them to operate on arrays.  For some simple use cases (like the examples below), we could just use `map`.  However, it is useful to start simple when demonstrating how to write a custom GPU kernel.  Below we'll using the `KernelAbstractions` `@kernel` macro to simplify writing our GPU kernel.  For example, rather than calculating the index to operate on explicitly from the thread and block indices, we'll use the `@index` macro to get the index for each thread to operate on.  There's also a useful `@Const` macro that allows us to specify that the data in our input arrays will remain constant, allowing for memory-related optimizations that aren't always possible. It will be up to us when we call the kernel to make sure that there as many threads as elements of `y` and `times`.  
+The CPU versions of `calc_rv_circ_kernel` and `calc_rv_kepler_kernel` operate on scalars.  For GPU calculations to be efficient, we need them to operate on arrays.  For some simple use cases (like the examples below), we could just use `map`.  However, it is useful to start simple when demonstrating how to write a custom GPU kernel.  Below, we'll use the `KernelAbstractions` `@kernel` macro to simplify writing our GPU kernel.  For example, rather than calculating the index to operate on explicitly from the thread and block indices, we'll use the `@index` macro to get the index for each thread to operate on.  There's also a useful `@Const` macro that allows us to specify that the data in our input arrays will remain constant, allowing for memory-related optimizations that aren't always possible. It will be up to us when we call the kernel to make sure that there as many threads as elements of `y` and `times`.  
 
 ```julia
 KernelAbstractions.@kernel function calc_rv_circ_kernel(y, @Const(times), @Const(param) )
@@ -181,9 +181,9 @@ KernelAbstractions.@kernel function calc_rv_kepler_kernel(y, @Const(times), @Con
 end
 ```
 
-One great feature of the `KernelAbstractions.jl` package is that we can the core code for kernels once, and turn them into kernels that can run on a CPU, an NVIDIA GPU or an AMD GPU. 
+One great feature of the `KernelAbstractions.jl` package is that we can use the core code for kernels once, and turn them into kernels that can run on a CPU, an NVIDIA GPU or an AMD GPU. 
 In order to get a kernel that can be executed, we call the function returned by the `@kernel` macro, specifying the hardware we will use to execute the kernel.  
-Optionally, we can specify the *workgroup size* and the size of the global indices to be used, when we request the kernel.  If we don't provide that info now, then we'll need to provide it at runtime. As we discussed previously, its often useful for the compiler to have information at compile time.  Therefore, we'll specify the workgroup size at compile time in building our kernels below.  We'll leave the size of the global indices as a dynamic parameter, so that we don't need to recompile a kernel for each problem size.
+Optionally, we can specify the *workgroup size* and the size of the global indices to be used when we request the kernel.  If we don't provide that info now, then we'll need to provide it at runtime. As we discussed previously, it's often useful for the compiler to have information at compile time.  Therefore, we'll specify the workgroup size at compile time in building our kernels below.  We'll leave the size of the global indices as a dynamic parameter, so that we don't need to recompile a kernel for each problem size.
 
 ```julia
 cpu_kernel_calc_rv_circ! = calc_rv_circ_kernel(CPU(), 16)
@@ -228,7 +228,7 @@ time_span_in_years = 1
 obs_data = generate_obs_data(time_span=time_span_in_years, num_obs=n_obs, param=θ_true, σ_obs=1.0, model=calc_rv_kepler);
 ```
 
-It's often nice to visualize our data, just to make sure our code is doing what we expect.  I've commented out the plotting code, so the pbs script will work.  Also, note that if we plotted all the data, it would take a *very* long time, you'll be better off just ploting a random sample of the points.
+It's often nice to visualize our data, just to make sure our code is doing what we expect.  I've commented out the plotting code, so the pbs script will work.  Also, note that if we plotted all the data, it would take a *very* long time; you'll be better off just plotting a random sample of the points.
 
 ```julia
 #using Plots
@@ -245,7 +245,7 @@ title!(plt,"Simulated Data")
 ```
 
 ## Executing a kernel
-First, we'll make sure that the CPU kernel we generated with KernelAbstractions gives similar results.  Since our kernel needs an array to write it's output to, we'll allocate memory for that.  Then we'll pass the optional arguement `ndrange` to tell it the size of the global indices that it should use for the times and outputs.  Kernel calls can be asynchronous, so they return an *event* that can be used to check whether the kernel has completed.  We call `wait` on the event to make sure our kernel has completed its work before using the results.
+First, we'll make sure that the CPU kernel we generated with KernelAbstractions gives similar results.  Since our kernel needs an array to write its output to, we'll allocate memory for that.  Then we'll pass the optional argument `ndrange` to tell it the size of the global indices that it should use for the times and outputs.  Kernel calls can be asynchronous, so they return an *event* that can be used to check whether the kernel has completed.  We call `wait` on the event to make sure our kernel has completed its work before using the results.
 
 ```julia
 output_cpu = similar(obs_data.t)
@@ -278,7 +278,7 @@ KernelAbstractions.synchronize(backend_gpu)
 ```
 
 ## Accuracy of GPU calculations
-Before we start benchmarking, let's check the the results from the GPU kernel are accurate.    
+Before we start benchmarking, let's check the results from the GPU kernel are accurate.    
 
 ```julia
 maximum(abs.(collect(output_gpu_d).-output_cpu))
@@ -303,7 +303,7 @@ maximum(abs.(collect(output_gpu_d64).-output_cpu))
 That should be much better.  (It's still not zero, since the GPU defaults to allowing the optimizer to perform optimizations that are not IEEE-compliant.) 
 
 ## Comparing CPU & GPU Performance 
-Next, we'll comapre the time to execute the CPU and GPU kernels.  In the test below, we'll compute the predicted radial velcoity for the first `num_obs_to_eval` time.  The default code below is for the full set of observation times.  But you may wish to try comparing the performance for fewer observations (without having to regenerate the simulated data).
+Next, we'll compare the time to execute the CPU and GPU kernels.  In the test below, we'll compute the predicted radial velocity for the first `num_obs_to_eval` time.  The default code below is for the full set of observation times.  But you may wish to try comparing the performance for fewer observations (without having to regenerate the simulated data).
 
 ```julia
 num_obs_to_eval = length(obs_data.t)
@@ -383,7 +383,7 @@ response_2e = missing # md"Insert response"
 ```
 
 ## Improving performance by performing reductions on GPU
-In the previous calculations, there was a substantial ammount of data to be transfered back from the GPU to CPU.  Often, we don't need all the data to be moved back to the CPU, since we're primarily interested in one or more summary statistics.  For example, we might be interested in the chi-squared statistic for comparing our model predictions to the data.  In that case, we'll only need to return a very small ammount of data from the GPU back to the CPU.  Below, we'll see how that affects the performance.  
+In the previous calculations, there was a substantial amount of data to be transferred back from the GPU to CPU.  Often, we don't need all the data to be moved back to the CPU, since we're primarily interested in one or more summary statistics.  For example, we might be interested in the chi-squared statistic for comparing our model predictions to the data.  In that case, we'll only need to return a very small amount of data from the GPU back to the CPU.  Below, we'll see how that affects the performance.  
 
 First, let's try calculating chi-squared the obvious way on the CPU.
 
@@ -434,7 +434,7 @@ Now let's try the same calculation on the CPU using the CPU kernel built by `Ker
 @benchmark cpu_calc_chisq_kepler($obs_data,$θ_true) seconds=1
 ```
 
-That was likely much faster than the simple way!  How is that possible?  The `KernelAbstractions` package is also parallelizing the calculation over multiple threads (assuming that you launched julia using multipel threads).   Let's check how many threads are avaliable.
+That was likely much faster than the simple way!  How is that possible?  The `KernelAbstractions` package is also parallelizing the calculation over multiple threads (assuming that you launched Julia using multiple threads).   Let's check how many threads are available.
 
 ```julia
 Threads.nthreads()
@@ -455,7 +455,7 @@ function gpu_calc_chisq_kepler(t::CuArray, rv_obs::CuArray, σ::CuArray, θ; wor
 end
 ```
 
- Note that, previously, we didn't transfer the observed velocity and uncertainty to the GPU.  In order to perform the reduction on the GPU, we'll want to do that.  To make it more convenient, we can write a wrapper function that accepts AbstractArrays and transfers them to the GPU if necessary.  We'll also provide an optional workspace parameter, so that we can pass a preallocated array to store the predicted radial velocities in.
+Note that, previously, we didn't transfer the observed velocity and uncertainty to the GPU.  In order to perform the reduction on the GPU, we'll want to do that.  To make it more convenient, we can write a wrapper function that accepts AbstractArrays and transfers them to the GPU if necessary.  We'll also provide an optional workspace parameter, so that we can pass a preallocated array to store the predicted radial velocities in.
 
 ```julia
 function gpu_calc_chisq_kepler(t::AbstractArray, rv_obs::AbstractArray, σ::AbstractArray, θ; workspace = missing )
@@ -481,7 +481,7 @@ Before benchmarking, let's make sure that the results are acceptably accurate.
 gpu_calc_chisq_kepler(obs_data, θ_true) ≈ cpu_calc_chisq_kepler(obs_data, θ_true)
 ```
 
-2f.  What do you predict for the time required to transfer the input data to the GPU, to compute the predicted velocities (allocating GPU memory to hold the results), to calcualte chi-squared on the GPU and to return just the chi-squared value to the CPU?
+2f.  What do you predict for the time required to transfer the input data to the GPU, to compute the predicted velocities (allocating GPU memory to hold the results), to calculate chi-squared on the GPU, and to return just the chi-squared value to the CPU?
 
 ```julia
 response_2f = missing # md"Insert response"
@@ -497,7 +497,7 @@ response_2f = missing # md"Insert response"
 response_2g = missing # md"Insert response"
 ```
 
-Now, we'll repeat the benchmarking, but using input data already loaded onto the GPU and a pre-alocated workspace on the GPU.  The function below helps with that.  Don't worry about the non-obvious syntax.
+Now, we'll repeat the benchmarking, but using input data already loaded onto the GPU and a pre-allocated workspace on the GPU.  The function below helps with that.  Don't worry about the non-obvious syntax.
 
 ```julia
 function convert_namedtuple_of_arrays_to_namedtuple_of_cuarrays(θ::NamedTuple{NTK,NTVT}) where { NTK, T<:Real, N1, A<:AbstractArray{T,N1}, N2, NTVT<:NTuple{N2,A} }
@@ -509,7 +509,7 @@ end
 obs_data_gpu = convert_namedtuple_of_arrays_to_namedtuple_of_cuarrays(obs_data)
 ```
 
-2h.  What do you predict for the time required to compute the predicted velocities (using a pre-allocated workspace on the GPU), to compute chi-squared on the GPU and to return just the chi-squared value to the CPU?  
+2h.  What do you predict for the time required to compute the predicted velocities (using a pre-allocated workspace on the GPU), to compute chi-squared on the GPU, and to return just the chi-squared value to the CPU?  
 
 ```julia
 response_2h = missing # md"Insert response"
@@ -530,9 +530,9 @@ For examples of how to fuse parallel calculations and reductions into a single G
 ## Evaluating many models at once
 In the previous examples, we got a good performance speed-up when we computed a million predicted velocities in one GPU call.  Most stars won't have nearly that many observations.  If we only had a few hundred observations and used the code above, we would not get nearly as good performance out of the CPU.  (Feel free to try repeating the above benchmarks, changing n_obs.  Remember, you'd need to rerun all the cells that are affected.)  Is there a way that GPU computing might still be useful?  
 
-Typically, we don't just want to evalute one model, but rather need to evaluate thousand, millions or billions of models to find those that are a good match to the observations.  This creates a second opportunity for parallelization.  We can have each thread evaluate the predicted velocity for one observation time and one set of model parameters.  Let's try that.  
+Typically, we don't just want to evaluate one model, but rather need to evaluate thousands, millions, or billions of models to find those that are a good match to the observations.  This creates a second opportunity for parallelization.  We can have each thread evaluate the predicted velocity for one observation time and one set of model parameters.  Let's try that.  
 
-First, we'll generate a smaller dataset for testing, and load it onto the GPU.
+First, we'll generate a smaller dataset for testing and load it onto the GPU.
 
 ```julia
 n_obs_small = 256
@@ -583,7 +583,7 @@ cpu_kernel_calc_rv_kepler_many_models!(output_many_models_cpu, obs_data_small.t,
 KernelAbstractions.synchronize(backend_cpu)
 ```
 
-Now, we'll create a GPU version of the kernel, allocate the memory for it to store its results in, load the model parameters to be evaluated onto the GPU, and test Ghe CPU kernel.
+Now, we'll create a GPU version of the kernel, allocate the memory for it to store its results in, load the model parameters to be evaluated onto the GPU, and test the CPU kernel.
 
 ```julia
 gpu_kernel_calc_rv_kepler_many_models! = calc_rv_kepler_kernel_many_models(backend_gpu, 32)
@@ -629,7 +629,7 @@ response_2k = missing # md"Insert response"
 ```
 
 ## Evaluating many models with reduction
-We can likely get a further speed-up be performing the reduction operation on the GPU and returning only the goodness of fit statistics, rather than every predicted velocity.  We'll try that below.
+We can likely get a further speed-up by performing the reduction operation on the GPU and returning only the goodness of fit statistics, rather than every predicted velocity.  We'll try that below.
 
 ```julia
 function cpu_calc_chisq_kepler_many_models(t::AbstractArray, rv_obs::AbstractArray, σ::AbstractArray, θ; workspace = missing )
@@ -708,17 +708,8 @@ end
 @elapsed map(n->calc_chisq_rv_kepler_cpu_simple(obs_data_small,get_nth_as_namedtuple(θ_eval,n)), 1:length(first(θ_eval)) )
 ```
 
-```julia
-```
+This line creates the ex2.jmd file.
 
 ```julia
-```
-
-```julia
-```
-
-```julia
-```
-
-```julia
+using Weave; convert_doc("ex2.ipynb","ex2.jmd");
 ```
