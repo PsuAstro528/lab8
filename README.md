@@ -27,21 +27,29 @@ Work through ex2.ipynb, either in the Jupyter notebook or by submitting ex2.slur
 Saving, adding, commiting, and pushing `ex1.ipynb` and `ex2.ipynb` is useful for sharing the plots created.  However, it's difficult to isolate the changes you made to the notebooks in GitHub due to all the formatting of ipynb files.  Therefore, when you're done with the lab, please also add, commit and push a markdown version of your responces to your repository.
 
 If you entered your responces in `ex1.ipynb` and `ex2.ipynb`, then you can run
-```julia
+```shell
 julia --project=. -e 'using Weave; convert_doc("ex1.ipynb","ex1.jmd")'
 julia --project=. -e 'using Weave; convert_doc("ex2.ipynb","ex2.jmd")'
 ```
 to convert the ipynb files into a jmd files (instead of html files), and then commit and push the `ex?.jmd` files like
-```julia
+```shell
 git add ex1.jmd ex2.jmd
 git commit -m "Adding markdown version of updated Jupyter notebooks"
 git push
 ```
 
 Alternatively, if you entered your responces in `ex1_responces.md` and `ex2_responces.md`, then you can simply 
-```julia
+```shell
 git add ex1_responces.md ex2_responces.md
 git commit -m "Adding markdown files with responces"
 git push
 ```
+
+Either way, it would also be helpful to add and commit the figures your scripts generated (in case your responses don't match what I'm expecting).
+```shell
+git add benchmarks_*.png 
+git commit -m "Adding figure"
+git push
+```
+
 
