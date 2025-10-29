@@ -17,15 +17,15 @@
 
 ## Save STDOUT and STDERR into one file (%j will expand to become the SLURM job id)
 #SBATCH --output=ex1_%j.log
-## Optionally could uncomment line below to write STDERR to a separate file
+## Optionally, you could uncomment the line below to write STDERR to a separate file
 ##SBATCH --error=ex1_%j.stderr  
 
-## Specificy job name, so easy to find using squeue –u
+## Specify job name, so easy to find using squeue –u
 #SBATCH --job-name=ex1
 
-## Uncomment next two lines (by removing one of #'s in each line) and replace with your email if you want to be notifed when jobs start and stop
+## Uncomment next two lines (by removing one of #'s in each line) and replace with your email if you want to be notified when jobs start and stop
 ##SBATCH --mail-user=YOUR_EMAIL_HERE@psu.edu
-## Ask for emails when jobs begins, ends or fails (options are ALL, NONE, BEGIN, END, FAIL)
+## Ask for emails when jobs begin, end, or fail (options are ALL, NONE, BEGIN, END, FAIL)
 #SBATCH --mail-type=ALL
 
 echo "Starting job $SLURM_JOB_NAME"
@@ -35,7 +35,7 @@ date
 echo "This job was assigned the following nodes"
 echo $SLURM_NODELIST
 
-echo "Activing environment with that provides Julia 1.11.2"
+echo "Activating environment that provides Julia 1.11.2"
 source /storage/ehome/ebf11/hpc4astro/astro_528/scripts/env_setup
 
 echo "About to change into $SLURM_SUBMIT_DIR"
@@ -60,7 +60,7 @@ echo "# About to run Pluto notebook and generate HTML version with outputs, usin
 # export JULIA_PKG_OFFLINE="true"
 julia --project=. -t $SLURM_TASKS_PER_NODE -e 'using Weave; weave("ex1.ipynb")'                  # To create Html version of outputs
 # julia --project=. -t $SLURM_TASKS_PER_NODE -e 'using Weave; convert_doc("ex1.ipynb","ex1.jmd")'  # To create Markdown version
-## If using a Pluto notebook instead of a Jupyer notebook
+## If using a Pluto notebook instead of a Jupyter notebook
 ## julia --project -t $SLURM_TASKS_PER_NODE -e 'import Pkg, PlutoSliderServer; Pkg.offline(); PlutoSliderServer.export_notebook("ex1.jl")'
 ## Or to just run Pluto notebook without saving HTML version
 ## julia -t $SLURM_TASKS_PER_NODE -e 'using Pkg, Pluto; Pkg.offline(); Pluto.activate_notebook_environment("ex1.jl"); Pkg.instantiate(); include("ex1.jl")'  
